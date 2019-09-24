@@ -1,0 +1,148 @@
+<?xml version='1.0'?>
+<robot name="rospibot_model_06">
+
+  <material name="red">
+    <color rgba="0.8 0 0 1"/>
+  </material>
+
+  <material name="green">
+    <color rgba="0 0.8 0 1"/>
+  </material>
+
+  <material name="blue">
+    <color rgba="0 0 0.8 1"/>
+  </material>
+
+  <material name="white">
+    <color rgba="1 1 1 1"/>
+  </material>
+
+  <material name="black">
+    <color rgba="0 0 0 1"/>
+  </material>
+
+  <material name="transparent">
+    <color rgba="1 1 1 0.1"/>
+  </material>
+  
+  <!-- Base Link -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="-0.075 0 0.068" rpy="0 0 0" />
+      <geometry>
+	<box size="0.287 0.19 0.003"/>
+      </geometry>
+      <material name="white" />
+    </visual>
+
+    <!-- Base collision -->
+    <collision>
+      <origin xyz="-0.075 0 0.068" rpy="0 0 0" />
+      <geometry>
+          <box size="0.287 0.19 0.003"/>
+      </geometry>
+    </collision>
+
+    <!-- Caster -->
+    <visual name="caster">
+      <origin xyz="-0.16 0 0.032" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.032" />
+      </geometry>
+      <material name="black" />
+    </visual> 
+
+    <!-- Caster collision -->
+    <collision>
+      <origin xyz="-0.16 0 00.032" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.032" />
+      </geometry>
+    </collision>
+
+  </link>
+  
+  <!-- Right Wheel -->
+  <link name="right_wheel">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.570795 0 0" />
+      <geometry>
+          <cylinder length="0.01" radius="0.032" />
+      </geometry>
+    </visual>
+
+    <!-- Right Wheel collision -->
+    <collision>
+      <origin xyz="0 0 0" rpy="1.570795 0 0" />
+      <geometry>
+          <cylinder length="0.027" radius="0.032" />
+      </geometry>
+    </collision>
+
+  </link>
+  <joint name="joint_right_wheel" type="continuous">
+    <parent link="base_link"/>
+    <child link="right_wheel"/>
+    <origin xyz="0 -0.095 0.032" rpy="0 0 0" /> 
+    <axis xyz="0 1 0" />
+  </joint>
+
+  <!-- Left Wheel -->
+  <link name="left_wheel">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.570795 0 0" />
+      <geometry>
+          <cylinder length="0.01" radius="0.032" />
+      </geometry>
+    </visual>
+
+    <!-- Left Wheel collision -->
+    <collision>
+      <origin xyz="0 0 0" rpy="1.570795 0 0" />
+      <geometry>
+          <cylinder length="0.027" radius="0.032" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="joint_left_wheel" type="continuous">
+    <parent link="base_link"/>
+    <child link="left_wheel"/>
+    <origin xyz="0 0.095 0.032" rpy="0 0 0" /> 
+    <axis xyz="0 1 0" />
+  </joint>
+
+  <!-- imu device -->
+  <link name="base_imu">
+    <visual name="base_imu">
+      <origin xyz="0 0 0" rpy="0 1.570795 1.570795" />
+      <geometry>
+        <box size="0.05 0.015 0.03"/>
+      </geometry>
+      <material name="green" />
+    </visual>
+  </link>
+  <joint name="joint_imu" type="fixed">
+    <parent link="base_link"/>
+    <child link="base_imu"/>
+    <origin xyz="-0.07 0 0.068" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+  </joint>
+  
+  <!-- laser scan device -->
+  <link name="neato_laser">
+    <visual name="neato_laser">
+      <origin xyz="0 0 0" rpy="0 1.570795 1.570795" />
+      <geometry>
+        <box size="0.05 0.015 0.03"/>
+      </geometry>
+      <material name="green" />
+    </visual>
+  </link>
+  <joint name="joint_laser" type="fixed">
+    <parent link="base_link"/>
+    <child link="neato_laser"/>
+    <origin xyz="0.015 0 0.10" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+  </joint>
+</robot>

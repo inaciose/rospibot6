@@ -1,0 +1,43 @@
+<launch>
+  <!--
+  <param name="ticks_meter" value="14865" />
+  <param name="encoder_min" value="-2147483648" />
+  <param name="encoder_max" value="2147483648" />
+
+  <param name="wheel_low_wrap" value="" />
+  <param name="wheel_high_wrap" value="" />
+  -->
+
+  <node name="lpid_velocity" pkg="rospibot6" type="pid_velocity.py" output="screen">
+    <remap from="wheel" to="lwheel"/>
+    <remap from="motor_cmd" to="motor_left"/>
+    <remap from="wheel_vtarget" to="lwheel_vtarget"/>
+    <remap from="wheel_vel" to="lwheel_vel"/>
+    <rosparam param="Kp">1.0</rosparam>
+    <rosparam param="Ki">0.1</rosparam>
+    <rosparam param="Kd">0.0</rosparam>
+    <rosparam param="out_min">-32000</rosparam>
+    <rosparam param="out_max">32000</rosparam>
+    <rosparam param="rate">50</rosparam>
+    <rosparam param="timeout_ticks">2</rosparam>
+    <rosparam param="vel_threshold">0.001</rosparam>
+    <rosparam param="rolling_pts">5</rosparam>
+  </node>
+
+  <node name="rpid_velocity" pkg="rospibot6" type="pid_velocity.py" output="screen">
+    <remap from="wheel" to="rwheel"/>
+    <remap from="motor_cmd" to="motor_right"/>
+    <remap from="wheel_vtarget" to="rwheel_vtarget"/>
+    <remap from="wheel_vel" to="rwheel_vel"/>
+    <rosparam param="Kp">1.0</rosparam>
+    <rosparam param="Ki">0.1</rosparam>
+    <rosparam param="Kd">0.0</rosparam>
+    <rosparam param="out_min">-32000</rosparam>
+    <rosparam param="out_max">32000</rosparam>
+    <rosparam param="rate">50</rosparam>
+    <rosparam param="timeout_ticks">2</rosparam>
+    <rosparam param="vel_threshold">0.001</rosparam>
+    <rosparam param="rolling_pts">5</rosparam>
+  </node>
+
+</launch>

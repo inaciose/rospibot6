@@ -1,0 +1,16 @@
+<launch>
+  <!--
+  <param name="ticks_meter">14865</param>
+  <param name="encoder_min">-2147483648</param>
+  <param name="encoder_max">2147483648</param>
+  <param name="wheel_low_wrap"></param>
+  <param name="wheel_high_wrap"></param>
+  -->
+  <node name="diff_tf" pkg="rospibot6" type="diff_tf.py" output="screen">
+    <rosparam param="ticks_meter">14865</rosparam> 
+    <rosparam param="base_width">0.19</rosparam>
+    <rosparam param="base_frame_id">base_link</rosparam>
+    <rosparam param="odom_frame_id">odom</rosparam>
+    <rosparam param="rate">50</rosparam>
+  </node>
+</launch>

@@ -1,0 +1,8 @@
+<launch>
+  <node name="diff_twist" pkg="rospibot6" type="diff_twist.py" output="screen" >
+    <!--<remap from="wheel_vel" to="lwheel_vel"/>-->
+    <rosparam param="base_width">0.19</rosparam>
+    <rosparam param="timeout_ticks">2</rosparam>
+    <rosparam param="rate">50</rosparam>
+  </node>
+</launch>

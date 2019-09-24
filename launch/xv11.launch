@@ -1,0 +1,7 @@
+<launch>
+<node pkg="xv_11_laser_driver" type="neato_laser_publisher" name="neato_laser_publisher" respawn="true" output="screen">
+  <param name="port" value="/dev/ttyAMA0"/>
+  <param name="firmware_version" value="2"/>
+</node>
+</launch>
+
