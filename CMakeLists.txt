@@ -16,6 +16,8 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   sensor_msgs
   geometry_msgs
+  nav_msgs
+  tf
 )
 
 #add_definitions( -DMPU6050 -DHMC5883L_SECONDARY -DEMPL_TARGET_LINUX )
@@ -166,6 +168,14 @@ add_executable(base1 src/base_stm32d_bcm2835_mpu6050.cpp
     ${PATH_I2CDEVLIB}Arduino/MPU6050/MPU6050.cpp
 )
 target_link_libraries(base1
+   ${catkin_LIBRARIES}
+   bcm2835
+)
+add_executable(base2 src/base_stm32d_bcm2835_mpu6050_odom_pid.cpp
+    ${PATH_I2CDEVLIB}RaspberryPi_bcm2835/I2Cdev/I2Cdev.cpp
+    ${PATH_I2CDEVLIB}Arduino/MPU6050/MPU6050.cpp
+)
+target_link_libraries(base2
    ${catkin_LIBRARIES}
    bcm2835
 )
