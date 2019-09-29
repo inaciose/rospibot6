@@ -1,0 +1,61 @@
+<launch>
+
+<!--
+  <param name="ticks_meter" value="14865" />
+  <param name="encoder_min" value="-2147483648" />
+  <param name="encoder_max" value="2147483648" />
+-->
+
+  <arg name="model" default="robot1.urdf" />
+  <arg name="gui" default="False" />
+
+  <!-- set these parameters on Parameter Server -->
+  <param name="robot_description" textfile="$(find rospibot6)/urdf/$(arg model)" />
+  <param name="use_gui" value="$(arg gui)"/>
+
+  <!--<include file="$(find rospibot6)/launch/diff_tf.launch"/>-->
+
+  <!-- Start 2 nodes: joint_state_publisher, robot_state_publisher -->
+  <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" />
+
+  <node name="xv11" pkg="xv_11_laser_driver" type="neato_laser_publisher" respawn="true" output="screen">
+    <param name="port" value="/dev/ttyAMA0"/>
+    <param name="firmware_version" value="2"/>
+  </node>
+
+  <node name="base_node" pkg="rospibot6" type="base4" output="screen">
+    <!--<rosparam file="$(find mypackage)/config/example.yaml" command="load" />-->
+    <remap from="wheel_left" to="lwheel"/>
+    <remap from="wheel_right" to="rwheel"/>
+    <param name="frequency" type="int" value="20" />
+    <!-- BASE -->
+    <param name="wheel_rad" type="double" value="0.032" />
+    <param name="wheel_sep" type="double" value="0.190" />
+    <param name="wheel_encoder_pulses" type="double" value="1920.0" />
+    <!-- PID -->
+    <param name="pid_out_trh" type="double" value="0.0" />
+    <param name="pid_out_min" type="double" value="0.0" />
+    <param name="pid_out_max" type="double" value="64.0" />
+    <param name="pid_out_k" type="double" value="500.0" />
+    <param name="pid_sample_time" type="double" value="0.050" />
+    <param name="pid_setpoint_max" type="double" value="150000.0" />
+    <param name="pid_left_kp" type="double" value="0.7" />
+    <param name="pid_left_ki" type="double" value="0.01" />
+    <param name="pid_left_kd" type="double" value="0.0" />
+    <param name="pid_right_kp" type="double" value="0.7" />
+    <param name="pid_right_ki" type="double" value="0.01" />
+    <param name="pid_right_kd" type="double" value="0.0" />
+    <!-- IMU -->
+    <param name="frame_id" type="str" value="base_imu" />
+    <param name="ax" type="int" value="0" />
+    <param name="ay" type="int" value="0" />
+    <param name="az" type="int" value="0" />
+    <param name="gx" type="int" value="0" />
+    <param name="gy" type="int" value="0" />
+    <param name="gz" type="int" value="0" />
+    <param name="ado" type="bool" value="false" />
+    <param name="debug" type="bool" value="false" />
+  </node>
+
+</launch>

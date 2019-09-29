@@ -180,6 +180,25 @@ target_link_libraries(base2
    bcm2835
 )
 
+add_executable(base3 src/base_stm32d_bcm2835_mpu6050_pid.cpp
+    ${PATH_I2CDEVLIB}RaspberryPi_bcm2835/I2Cdev/I2Cdev.cpp
+    ${PATH_I2CDEVLIB}Arduino/MPU6050/MPU6050.cpp
+)
+target_link_libraries(base3
+   ${catkin_LIBRARIES}
+   bcm2835
+)
+
+add_executable(base4 src/base_stm32d_bcm2835_mpu6050_odom_pid_lcd.cpp src/nokia5110.cpp
+    ${PATH_I2CDEVLIB}RaspberryPi_bcm2835/I2Cdev/I2Cdev.cpp
+    ${PATH_I2CDEVLIB}Arduino/MPU6050/MPU6050.cpp
+)
+target_link_libraries(base4
+   ${catkin_LIBRARIES}
+   bcm2835
+)
+
+
 #############
 ## Install ##
 #############

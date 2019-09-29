@@ -315,7 +315,7 @@ double computeRightPID(double inp) {
 // ===                        MAIN LOOP                         ===
 // ================================================================
 
-void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::TransformBroadcaster odom_broadcaster) {
+void loop(ros::NodeHandle pn, ros::NodeHandle n) {
     //
     // PROCESS MOTORS
     //
@@ -459,85 +459,6 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
 	//ROS_INFO("Setpoint %f %f %f %f", leftMotorSpeedRequest, rightMotorSpeedRequest, leftSpeedPidSetPoint, rightSpeedPidSetPoint);
 
 	newCmdVel = false;
-    }
-
-    // publish odometry on timer
-    if(ros::Time::now().toSec() > tfPublisherTimer) {
-
-	current_time = ros::Time::now();
-	double elapsed = (last_time - current_time).toSec();
-	last_time  = current_time;
-
-	//float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) * distancePerPulse;
-	//float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) * distancePerPulse;
-
-        float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) / pulses_per_m;
-        float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) / pulses_per_m;
-
-	encoderLeftPulsesOdomLast = encoderLeftPulses;
-	encoderRightPulsesOdomLast = encoderRightPulses;
-
-	// distance traveled is the average of the two wheels
-	float d = ( d_left + d_right ) / 2;
-
-	// this approximation works (in radians) for small angles
-	float th = ( d_right - d_left ) / wheel_sep;
-
-	// calculate velocities
-	odomXvel = d / elapsed;
-	odomZvel = th / elapsed;
-
-	if(d != 0) {
-	    // calculate distance traveled in x and y
-	    double x = cos(th) * d;
-	    double y = -sin(th) * d;
-	    //calculate the final position of the robot
-	    bodyX = bodyX + (cos(bodyTheta) * x - sin(bodyTheta) * y);
-	    bodyY = bodyY + (sin(bodyTheta) * x + cos(bodyTheta) * y);
-	}
-
-	if(th != 0) {
-	    bodyTheta = bodyTheta + th;
-	}
-
-	//ROS_INFO("odom: %f %f %f %f %f %f %f", bodyX, bodyY, bodyTheta, d_left, d_right, d, th);
-
-	//since all odometry is 6DOF we'll need a quaternion created from yaw
-	geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(bodyTheta);
-
-	//first, we'll publish the transform over tf
-	geometry_msgs::TransformStamped odom_trans;
-	odom_trans.header.stamp = current_time;
-	odom_trans.header.frame_id = "odom";
-	odom_trans.child_frame_id = "base_link";
-
-	odom_trans.transform.translation.x = bodyX;
-	odom_trans.transform.translation.y = bodyY;
-	odom_trans.transform.translation.z = 0.0;
-	odom_trans.transform.rotation = odom_quat;
-
-	//send the transform
-	odom_broadcaster.sendTransform(odom_trans);
-
-	//next, we'll publish the odometry message over ROS
-	nav_msgs::Odometry odom;
-	odom.header.stamp = current_time;
-	odom.header.frame_id = "odom";
-
-	//set the position
-	odom.pose.pose.position.x = bodyX;
-	odom.pose.pose.position.y = bodyY;
-	odom.pose.pose.position.z = 0.0;
-	odom.pose.pose.orientation = odom_quat;
-
-	//set the velocity
-	odom.child_frame_id = "base_link";
-	odom.twist.twist.linear.x = odomXvel;
-	odom.twist.twist.linear.y = 0;
-	odom.twist.twist.angular.z = odomZvel;
-
-	//publish the message
-	odom_pub.publish(odom);
     }
 
     //
@@ -687,13 +608,13 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
     if(displayLoopInfo) {
       ROS_INFO("%d %f %f %d %d %d %d %f %f %f %f %d %d %d", cmd, cmd_vel_x, cmd_vel_z, pwm_data[1].i, pwm_data[2].i, enc_data[0].i, enc_data[1].i, leftSpeedPidInput, rightSpeedPidInput, leftSpeedPidSetPoint, rightSpeedPidSetPoint, res1, res2, res3);
     }
-    
+
 }
 
 int main(int argc, char **argv){
 
 
-    ros::init(argc, argv, "base_mpu6050");
+    ros::init(argc, argv, "base3");
 
     // Allows parameters passed in via <param>
     ros::NodeHandle pn("~");
@@ -709,16 +630,16 @@ int main(int argc, char **argv){
     // SETUP BASE PARAMETERS
     //
     // units are m, m/s, radian/s
- 
+
     pn.param<double>("wheel_rad", wheel_rad, WHEEL_RAD);
     std::cout << "wheel_rad: " << wheel_rad << std::endl;
-    
+
     pn.param<double>("wheel_sep", wheel_sep, WHEEL_SEP);
     std::cout << "wheel_sep: " << wheel_sep << std::endl;
 
     pn.param<double>("wheel_encoder_pulses", wheel_encoder_pulses, ENCODER_PULSES);
     std::cout << "wheel_encoder_pulses: " << wheel_encoder_pulses << std::endl;
-    
+
     // stored for fast calculation
     double wheel_per = 2 * PI * wheel_rad;
     double distancePerPulse = wheel_per / wheel_encoder_pulses;
@@ -758,16 +679,16 @@ int main(int argc, char **argv){
 
     pn.param<double>("pid_left_kd", kdLeft, 0);
     std::cout << "pid_left_kd: " << kdLeft << std::endl;
-    
+
     pn.param<double>("pid_right_kp", kpRight, 100);
     std::cout << "pid_right_kp: " << kpRight << std::endl;
-        
+
     pn.param<double>("pid_right_ki", kiRight, 0.1);
     std::cout << "pid_right_ki: " << kiRight << std::endl;
-    
+
     pn.param<double>("pid_right_kd", kdRight, 0.0);
     std::cout << "pid_right_kd: " << kdRight << std::endl;
-    
+
     //
     // SETUP IMU PARAMETERS
     //
@@ -835,18 +756,12 @@ int main(int argc, char **argv){
     ros::Subscriber cmd_sub = n.subscribe("cmd", 100, cmdCallback);
     for(int i = 0; i < 8; i++) cmd_data[i].i = 0;
 
-
-    ros::Publisher odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
-    odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
-    tf::TransformBroadcaster odom_broadcaster;
-
     // setup ros subscribers
     ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 1000, twistCallback);
 
     // setup other ros variables
     ros::Rate loop_rate(100);
     encoderPublisherTimer = ros::Time::now().toSec();
-    tfPublisherTimer = ros::Time::now().toSec();
 
     // setup pid
     leftSpeedPidSetPoint = 0;
@@ -942,7 +857,7 @@ int main(int argc, char **argv){
 
     ros::Rate r(sample_rate);
     while(ros::ok()){
-        loop(pn, n, odom_pub, odom_broadcaster);
+        loop(pn, n);
         ros::spinOnce();
         r.sleep();
     }

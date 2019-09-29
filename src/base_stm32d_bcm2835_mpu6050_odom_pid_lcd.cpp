@@ -6,6 +6,7 @@
 #include <string.h>
 #include <math.h>
 #include <signal.h>
+#include <stdbool.h>
 
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
@@ -23,8 +24,33 @@
 #include <tf/transform_broadcaster.h>
 #include <nav_msgs/Odometry.h>
 
+// lcd
+#include "nokia5110.h"
+
+// ip address
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+
+// uptime
+#include <sys/sysinfo.h>
+
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
+
+// LCD pins
+#define LCD_PIN_BL    21
+#define LCD_PIN_SCE   8
+#define LCD_PIN_RESET 24
+#define LCD_PIN_DC    23
+#define LCD_PIN_SDIN  10
+#define LCD_PIN_SCLK  11
+
+#define LCD_TIMER 1
+double lcdTimer;
 
 #define ENCODER_PULSES 1920.0
 #define WHEEL_RAD 0.032
@@ -223,6 +249,24 @@ bool newCmd = false;
 // loop info for debug
 bool displayLoopInfo = false;
 
+void getIfAddress(char* ifname, char* result) {
+        int fd;
+        struct ifreq ifr;
+
+        // open soket
+        fd = socket(AF_INET, SOCK_DGRAM, 0);
+        // get an IPv4 IP address
+        ifr.ifr_addr.sa_family = AF_INET;
+        // get IP address attached to ifname: ex. "eth0" or "wlx0013efcb0cbc"
+        strncpy(ifr.ifr_name, ifname, IFNAMSIZ-1);
+        ioctl(fd, SIOCGIFADDR, &ifr);
+        close(fd);
+        // convert to human readable
+        sprintf(result, "%s", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
+        // debug
+        //printf("%s %s\n", ifname, result);
+}
+
 void leftPwmCallback(std_msgs::Float32 msg) {
     //ROS_INFO("motorLeftCallback: %f", msg.data);
     pwm_data[1].i = (int32_t)msg.data;
@@ -325,6 +369,18 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
     ros::Time current_time;
     static ros::Time last_time;
 
+    // lcd output vars
+    char lcdOutString1[24];
+    char lcdOutString2[24];
+    char lcdOutString3[24];
+    char lcdOutString6[24];
+
+    // lcd uptime
+    struct sysinfo info;
+    int uptimeDays = 0;
+    int uptimeHours = 0;
+    int uptimeMins = 0;
+    int uptimeSecs = 0;
 
     // publish encoders pulse count on timer
     if(ros::Time::now().toSec() > encoderPublisherTimer) {
@@ -400,6 +456,7 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
 	}
 
 	newPidPwm = true;
+
 	pidTimer = ros::Time::now().toSec() + PID_SAMPLE_TIME;
     }
 
@@ -568,6 +625,51 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
       newCmd = false;
       cmd = 0;
     }
+
+    if(ros::Time::now().toSec() > lcdTimer) {
+        // get the ip addresses
+        getIfAddress("eth0", lcdOutString2);
+        getIfAddress("wlx0013efcb0cbc", lcdOutString3);
+
+        // get uptime (from system info)
+        // we can also get the load
+        sysinfo(&info);
+
+        // convert to human standart
+        uptimeMins = info.uptime / 60;
+        uptimeSecs = info.uptime - uptimeMins * 60;
+
+        uptimeHours = uptimeMins / 60;
+        uptimeMins = uptimeMins - uptimeHours * 60;
+
+        uptimeDays = uptimeHours / 24;
+        uptimeHours = uptimeHours - uptimeDays * 24;
+
+        // debug
+        //printf("Uptime = %ld %d %02d:%02d:%02d\n", info.uptime, uptimeDays, uptimeHours, uptimeMins, upti$
+
+        // display on lcd
+        lcdClear();
+
+        sprintf(lcdOutString1, "IP & uptime ");
+        lcdGotoXY(0,0);
+        lcdString(lcdOutString1);
+
+        lcdGotoXY(0,1);
+        lcdString(lcdOutString2);
+
+        lcdGotoXY(0,3);
+        lcdString(lcdOutString3);
+
+        lcdGotoXY(0,5);
+        sprintf(lcdOutString6,"%d %02d:%02d:%02d", uptimeDays, uptimeHours, uptimeMins, uptimeSecs);
+        lcdString(lcdOutString6);
+
+        //bcm2835_delay(800);
+
+        lcdTimer = ros::Time::now().toSec() + LCD_TIMER;
+    }
+
 
     if(ros::Time::now().toSec() > imuPublisherTimer) {
 	//
@@ -772,6 +874,7 @@ int main(int argc, char **argv){
     // SETUP IMU PARAMETERS
     //
 
+    //TODO
     pn.param<int>("frequency", sample_rate, DEFAULT_SAMPLE_RATE_HZ);
     std::cout << "Using sample rate: " << sample_rate << std::endl;
 
@@ -844,7 +947,7 @@ int main(int argc, char **argv){
     ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 1000, twistCallback);
 
     // setup other ros variables
-    ros::Rate loop_rate(100);
+    ros::Rate loop_rate(100); //TODO
     encoderPublisherTimer = ros::Time::now().toSec();
     tfPublisherTimer = ros::Time::now().toSec();
 
@@ -940,11 +1043,23 @@ int main(int argc, char **argv){
     encoderLeftPulsesLast = 0;
     encoderRightPulsesLast = 0;
 
-    ros::Rate r(sample_rate);
+    //
+    // LCD
+    //
+
+    // set the nokia 5110 lcd pins on bcm2835
+    lcdCreate(LCD_PIN_RESET, LCD_PIN_SCE, LCD_PIN_DC, LCD_PIN_SDIN, LCD_PIN_SCLK, LCD_PIN_BL);
+
+    // start the lcd
+    lcdInit();
+
+    lcdTimer = ros::Time::now().toSec();
+
+    ros::Rate r(sample_rate); //TODO
     while(ros::ok()){
         loop(pn, n, odom_pub, odom_broadcaster);
         ros::spinOnce();
-        r.sleep();
+        r.sleep(); //TODO
     }
 
     std::cout << "Shutdown." << std::endl << std::flush;

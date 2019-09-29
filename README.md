@@ -16,7 +16,7 @@ sudo apt-get install ros-kinetic-gmapping
 #rosrun gmapping slam_gmapping scan:=scan
 
 sudo bash -c "source /opt/ros/kinetic/setup.bash; source /home/ubuntu/catkin_ws/devel/setup.bash; roslaunch rospibot6 robot.launch"
-rostopic pub --once mcu_cmd std_msgs/Int16 "data: 3"
+rostopic pub --once cmd std_msgs/Int16 "data: 3"
 roslaunch rospibot6 teleop.launch
 
 
