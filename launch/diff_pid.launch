@@ -7,7 +7,6 @@
   <param name="wheel_low_wrap" value="" />
   <param name="wheel_high_wrap" value="" />
   -->
-
   <node name="lpid_velocity" pkg="rospibot6" type="pid_velocity.py" output="screen">
     <remap from="wheel" to="lwheel"/>
     <remap from="motor_cmd" to="motor_left"/>
@@ -39,5 +38,4 @@
     <rosparam param="vel_threshold">0.001</rosparam>
     <rosparam param="rolling_pts">5</rosparam>
   </node>
-
 </launch>

@@ -1,3 +1,4 @@
+// https://github.com/richardghirst/PiBits/blob/master/MPU6050-Pi-Demo/demo_dmp.cpp
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -5,6 +6,7 @@
 #include <string.h>
 #include <math.h>
 #include <signal.h>
+#include <stdbool.h>
 
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
@@ -22,17 +24,42 @@
 #include <tf/transform_broadcaster.h>
 #include <nav_msgs/Odometry.h>
 
+// lcd
+#include "nokia5110.h"
+
+// ip address
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+
+// uptime
+#include <sys/sysinfo.h>
+
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 
-#define ENCODER_PULSES 960.0
+// LCD pins
+#define LCD_PIN_BL    21
+#define LCD_PIN_SCE   8
+#define LCD_PIN_RESET 24
+#define LCD_PIN_DC    23
+#define LCD_PIN_SDIN  10
+#define LCD_PIN_SCLK  11
+
+#define LCD_TIMER 1
+double lcdTimer;
+
+#define ENCODER_PULSES 1920.0
 #define WHEEL_RAD 0.032
 #define WHEEL_SEP 0.190
 
 #define PI 3.141592653
 
 #define ENCODER_PUBLISHER_TIMER 0.02
-//#define TF_PUBLISHER_TIMER 0.02
+#define TF_PUBLISHER_TIMER 0.02
 
 // units are m, m/s, radian/s
 double wheel_encoder_pulses = ENCODER_PULSES;
@@ -49,7 +76,6 @@ long encoderLeftPulses;
 long encoderRightPulses;
 
 // twist, pwm & pid variables
-bool pidComputeEnabled = true;
 double cmd_vel_x, cmd_vel_z;
 double leftMotorSpeedRequest,rightMotorSpeedRequest;
 
@@ -92,20 +118,23 @@ double kdRight = 0;
 // control variables
 bool newCmdVel = false;
 double encoderPublisherTimer;
-//double tfPublisherTimer;
+double tfPublisherTimer;
 
 // odometry
-//double bodyX;
-//double bodyY;
-//double bodyTheta;
+double bodyX;
+double bodyY;
+double bodyTheta;
+
+//ros::Publisher odom_pub;
+//tf::TransformBroadcaster odom_broadcaster;
 
 // odometry encoder variables
-//long encoderLeftPulsesOdomLast;
-//long encoderRightPulsesOdomLast;
+long encoderLeftPulsesOdomLast;
+long encoderRightPulsesOdomLast;
 
 // velocity
-//double odomXvel = 0;
-//double odomZvel = 0;
+double odomXvel = 0;
+double odomZvel = 0;
 
 //
 // MPU6050
@@ -220,6 +249,24 @@ bool newCmd = false;
 // loop info for debug
 bool displayLoopInfo = false;
 
+void getIfAddress(char* ifname, char* result) {
+        int fd;
+        struct ifreq ifr;
+
+        // open soket
+        fd = socket(AF_INET, SOCK_DGRAM, 0);
+        // get an IPv4 IP address
+        ifr.ifr_addr.sa_family = AF_INET;
+        // get IP address attached to ifname: ex. "eth0" or "wlx0013efcb0cbc"
+        strncpy(ifr.ifr_name, ifname, IFNAMSIZ-1);
+        ioctl(fd, SIOCGIFADDR, &ifr);
+        close(fd);
+        // convert to human readable
+        sprintf(result, "%s", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
+        // debug
+        //printf("%s %s\n", ifname, result);
+}
+
 void leftPwmCallback(std_msgs::Float32 msg) {
     //ROS_INFO("motorLeftCallback: %f", msg.data);
     pwm_data[1].i = (int32_t)msg.data;
@@ -312,7 +359,7 @@ double computeRightPID(double inp) {
 // ===                        MAIN LOOP                         ===
 // ================================================================
 
-void loop(ros::NodeHandle pn, ros::NodeHandle n) {
+void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::TransformBroadcaster odom_broadcaster) {
     //
     // PROCESS MOTORS
     //
@@ -322,6 +369,18 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
     ros::Time current_time;
     static ros::Time last_time;
 
+    // lcd output vars
+    char lcdOutString1[24];
+    char lcdOutString2[24];
+    char lcdOutString3[24];
+    char lcdOutString6[24];
+
+    // lcd uptime
+    struct sysinfo info;
+    int uptimeDays = 0;
+    int uptimeHours = 0;
+    int uptimeMins = 0;
+    int uptimeSecs = 0;
 
     // publish encoders pulse count on timer
     if(ros::Time::now().toSec() > encoderPublisherTimer) {
@@ -374,7 +433,7 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
 
     }
 
-    if(pidComputeEnabled && (ros::Time::now().toSec() > pidTimer)) {
+    if(ros::Time::now().toSec() > pidTimer) {
 
 	leftSpeedPidInput = abs(encoderLeftSpeedPidPulses);
 	rightSpeedPidInput = abs(encoderRightSpeedPidPulses);
@@ -397,6 +456,7 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
 	}
 
 	newPidPwm = true;
+
 	pidTimer = ros::Time::now().toSec() + PID_SAMPLE_TIME;
     }
 
@@ -418,7 +478,7 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
     }
 
     // update motors on new cmd_vel message
-    if(pidComputeEnabled && newCmdVel) {
+    if(newCmdVel) {
 	// calculate motors speed
 	//leftMotorSpeedRequest = 1.0 * cmd_vel_x - cmd_vel_z * wheel_sep / 2;
 	//rightMotorSpeedRequest = 1.0 * cmd_vel_x + cmd_vel_z * wheel_sep / 2;
@@ -458,6 +518,85 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
 	newCmdVel = false;
     }
 
+    // publish odometry on timer
+    if(ros::Time::now().toSec() > tfPublisherTimer) {
+
+	current_time = ros::Time::now();
+	double elapsed = (last_time - current_time).toSec();
+	last_time  = current_time;
+
+	//float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) * distancePerPulse;
+	//float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) * distancePerPulse;
+
+        float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) / pulses_per_m;
+        float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) / pulses_per_m;
+
+	encoderLeftPulsesOdomLast = encoderLeftPulses;
+	encoderRightPulsesOdomLast = encoderRightPulses;
+
+	// distance traveled is the average of the two wheels
+	float d = ( d_left + d_right ) / 2;
+
+	// this approximation works (in radians) for small angles
+	float th = ( d_right - d_left ) / wheel_sep;
+
+	// calculate velocities
+	odomXvel = d / elapsed;
+	odomZvel = th / elapsed;
+
+	if(d != 0) {
+	    // calculate distance traveled in x and y
+	    double x = cos(th) * d;
+	    double y = -sin(th) * d;
+	    //calculate the final position of the robot
+	    bodyX = bodyX + (cos(bodyTheta) * x - sin(bodyTheta) * y);
+	    bodyY = bodyY + (sin(bodyTheta) * x + cos(bodyTheta) * y);
+	}
+
+	if(th != 0) {
+	    bodyTheta = bodyTheta + th;
+	}
+
+	//ROS_INFO("odom: %f %f %f %f %f %f %f", bodyX, bodyY, bodyTheta, d_left, d_right, d, th);
+
+	//since all odometry is 6DOF we'll need a quaternion created from yaw
+	geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(bodyTheta);
+
+	//first, we'll publish the transform over tf
+	geometry_msgs::TransformStamped odom_trans;
+	odom_trans.header.stamp = current_time;
+	odom_trans.header.frame_id = "odom";
+	odom_trans.child_frame_id = "base_link";
+
+	odom_trans.transform.translation.x = bodyX;
+	odom_trans.transform.translation.y = bodyY;
+	odom_trans.transform.translation.z = 0.0;
+	odom_trans.transform.rotation = odom_quat;
+
+	//send the transform
+	odom_broadcaster.sendTransform(odom_trans);
+
+	//next, we'll publish the odometry message over ROS
+	nav_msgs::Odometry odom;
+	odom.header.stamp = current_time;
+	odom.header.frame_id = "odom";
+
+	//set the position
+	odom.pose.pose.position.x = bodyX;
+	odom.pose.pose.position.y = bodyY;
+	odom.pose.pose.position.z = 0.0;
+	odom.pose.pose.orientation = odom_quat;
+
+	//set the velocity
+	odom.child_frame_id = "base_link";
+	odom.twist.twist.linear.x = odomXvel;
+	odom.twist.twist.linear.y = 0;
+	odom.twist.twist.angular.z = odomZvel;
+
+	//publish the message
+	odom_pub.publish(odom);
+    }
+
     //
     // SEND MCU COMMANDS
     //
@@ -486,6 +625,51 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
       newCmd = false;
       cmd = 0;
     }
+
+    if(ros::Time::now().toSec() > lcdTimer) {
+        // get the ip addresses
+        getIfAddress("eth0", lcdOutString2);
+        getIfAddress("wlx0013efcb0cbc", lcdOutString3);
+
+        // get uptime (from system info)
+        // we can also get the load
+        sysinfo(&info);
+
+        // convert to human standart
+        uptimeMins = info.uptime / 60;
+        uptimeSecs = info.uptime - uptimeMins * 60;
+
+        uptimeHours = uptimeMins / 60;
+        uptimeMins = uptimeMins - uptimeHours * 60;
+
+        uptimeDays = uptimeHours / 24;
+        uptimeHours = uptimeHours - uptimeDays * 24;
+
+        // debug
+        //printf("Uptime = %ld %d %02d:%02d:%02d\n", info.uptime, uptimeDays, uptimeHours, uptimeMins, upti$
+
+        // display on lcd
+        lcdClear();
+
+        sprintf(lcdOutString1, "IP & uptime ");
+        lcdGotoXY(0,0);
+        lcdString(lcdOutString1);
+
+        lcdGotoXY(0,1);
+        lcdString(lcdOutString2);
+
+        lcdGotoXY(0,3);
+        lcdString(lcdOutString3);
+
+        lcdGotoXY(0,5);
+        sprintf(lcdOutString6,"%d %02d:%02d:%02d", uptimeDays, uptimeHours, uptimeMins, uptimeSecs);
+        lcdString(lcdOutString6);
+
+        //bcm2835_delay(800);
+
+        lcdTimer = ros::Time::now().toSec() + LCD_TIMER;
+    }
+
 
     if(ros::Time::now().toSec() > imuPublisherTimer) {
 	//
@@ -605,12 +789,13 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
     if(displayLoopInfo) {
       ROS_INFO("%d %f %f %d %d %d %d %f %f %f %f %d %d %d", cmd, cmd_vel_x, cmd_vel_z, pwm_data[1].i, pwm_data[2].i, enc_data[0].i, enc_data[1].i, leftSpeedPidInput, rightSpeedPidInput, leftSpeedPidSetPoint, rightSpeedPidSetPoint, res1, res2, res3);
     }
-
+    
 }
 
 int main(int argc, char **argv){
 
-    ros::init(argc, argv, "base3");
+
+    ros::init(argc, argv, "base_mpu6050");
 
     // Allows parameters passed in via <param>
     ros::NodeHandle pn("~");
@@ -625,20 +810,17 @@ int main(int argc, char **argv){
     //
     // SETUP BASE PARAMETERS
     //
-
-    pn.param<bool>("pid_enabled", pidComputeEnabled, 0);
-    std::cout << "pid_enabled: " << pidComputeEnabled << std::endl;
-
     // units are m, m/s, radian/s
+ 
     pn.param<double>("wheel_rad", wheel_rad, WHEEL_RAD);
     std::cout << "wheel_rad: " << wheel_rad << std::endl;
-
+    
     pn.param<double>("wheel_sep", wheel_sep, WHEEL_SEP);
     std::cout << "wheel_sep: " << wheel_sep << std::endl;
 
     pn.param<double>("wheel_encoder_pulses", wheel_encoder_pulses, ENCODER_PULSES);
     std::cout << "wheel_encoder_pulses: " << wheel_encoder_pulses << std::endl;
-
+    
     // stored for fast calculation
     double wheel_per = 2 * PI * wheel_rad;
     double distancePerPulse = wheel_per / wheel_encoder_pulses;
@@ -678,20 +860,21 @@ int main(int argc, char **argv){
 
     pn.param<double>("pid_left_kd", kdLeft, 0);
     std::cout << "pid_left_kd: " << kdLeft << std::endl;
-
+    
     pn.param<double>("pid_right_kp", kpRight, 100);
     std::cout << "pid_right_kp: " << kpRight << std::endl;
-
+        
     pn.param<double>("pid_right_ki", kiRight, 0.1);
     std::cout << "pid_right_ki: " << kiRight << std::endl;
-
+    
     pn.param<double>("pid_right_kd", kdRight, 0.0);
     std::cout << "pid_right_kd: " << kdRight << std::endl;
-
+    
     //
     // SETUP IMU PARAMETERS
     //
 
+    //TODO
     pn.param<int>("frequency", sample_rate, DEFAULT_SAMPLE_RATE_HZ);
     std::cout << "Using sample rate: " << sample_rate << std::endl;
 
@@ -755,14 +938,18 @@ int main(int argc, char **argv){
     ros::Subscriber cmd_sub = n.subscribe("cmd", 100, cmdCallback);
     for(int i = 0; i < 8; i++) cmd_data[i].i = 0;
 
+
+    ros::Publisher odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
+    odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
+    tf::TransformBroadcaster odom_broadcaster;
+
     // setup ros subscribers
-    if(pidComputeEnabled) {
-        ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 1000, twistCallback);
-    }
+    ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 1000, twistCallback);
 
     // setup other ros variables
-    ros::Rate loop_rate(100);
+    ros::Rate loop_rate(100); //TODO
     encoderPublisherTimer = ros::Time::now().toSec();
+    tfPublisherTimer = ros::Time::now().toSec();
 
     // setup pid
     leftSpeedPidSetPoint = 0;
@@ -856,11 +1043,23 @@ int main(int argc, char **argv){
     encoderLeftPulsesLast = 0;
     encoderRightPulsesLast = 0;
 
-    ros::Rate r(sample_rate);
+    //
+    // LCD
+    //
+
+    // set the nokia 5110 lcd pins on bcm2835
+    lcdCreate(LCD_PIN_RESET, LCD_PIN_SCE, LCD_PIN_DC, LCD_PIN_SDIN, LCD_PIN_SCLK, LCD_PIN_BL);
+
+    // start the lcd
+    lcdInit();
+
+    lcdTimer = ros::Time::now().toSec();
+
+    ros::Rate r(sample_rate); //TODO
     while(ros::ok()){
-        loop(pn, n);
+        loop(pn, n, odom_pub, odom_broadcaster);
         ros::spinOnce();
-        r.sleep();
+        r.sleep(); //TODO
     }
 
     std::cout << "Shutdown." << std::endl << std::flush;

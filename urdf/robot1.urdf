@@ -45,18 +45,18 @@
 
     <!-- Caster -->
     <visual name="caster">
-      <origin xyz="-0.16 0 0.032" rpy="0 0 0" />
+      <origin xyz="-0.16 0 0.033" rpy="0 0 0" />
       <geometry>
-        <sphere radius="0.032" />
+        <sphere radius="0.033" />
       </geometry>
       <material name="black" />
     </visual> 
 
     <!-- Caster collision -->
     <collision>
-      <origin xyz="-0.16 0 00.032" rpy="0 0 0" />
+      <origin xyz="-0.16 0 00.033" rpy="0 0 0" />
       <geometry>
-        <sphere radius="0.032" />
+        <sphere radius="0.033" />
       </geometry>
     </collision>
 
@@ -67,7 +67,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="1.570795 0 0" />
       <geometry>
-          <cylinder length="0.01" radius="0.032" />
+          <cylinder length="0.01" radius="0.033" />
       </geometry>
     </visual>
 
@@ -75,7 +75,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="1.570795 0 0" />
       <geometry>
-          <cylinder length="0.027" radius="0.032" />
+          <cylinder length="0.027" radius="0.033" />
       </geometry>
     </collision>
 
@@ -83,7 +83,7 @@
   <joint name="joint_right_wheel" type="continuous">
     <parent link="base_link"/>
     <child link="right_wheel"/>
-    <origin xyz="0 -0.095 0.032" rpy="0 0 0" /> 
+    <origin xyz="0 -0.095 0.033" rpy="0 0 0" /> 
     <axis xyz="0 1 0" />
   </joint>
 
@@ -92,7 +92,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="1.570795 0 0" />
       <geometry>
-          <cylinder length="0.01" radius="0.032" />
+          <cylinder length="0.01" radius="0.033" />
       </geometry>
     </visual>
 
@@ -100,7 +100,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="1.570795 0 0" />
       <geometry>
-          <cylinder length="0.027" radius="0.032" />
+          <cylinder length="0.027" radius="0.033" />
       </geometry>
     </collision>
   </link>
@@ -108,7 +108,7 @@
   <joint name="joint_left_wheel" type="continuous">
     <parent link="base_link"/>
     <child link="left_wheel"/>
-    <origin xyz="0 0.095 0.032" rpy="0 0 0" /> 
+    <origin xyz="0 0.095 0.033" rpy="0 0 0" /> 
     <axis xyz="0 1 0" />
   </joint>
 

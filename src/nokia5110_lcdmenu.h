@@ -1,0 +1,10 @@
+void lcdmenu_lcd_setup();
+void lcdmenu_buttons_setup();
+void lcdmenu_update();
+int lcdmenu_buttons_process();
+void lcdmenu_set_backlight(bool state);
+void lcdHome();
+void lcdMenuShowItem(uint8_t x, uint8_t y, const char text[20], bool sel);
+void lcdMenu1();
+void lcdMenu2();
+void lcdMenu();

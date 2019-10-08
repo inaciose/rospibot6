@@ -97,22 +97,22 @@ class PidVelocity():
     #####################################################
     def spinOnce(self):
     #####################################################
-        self.previous_error = 0.0
-        self.prev_vel = [0.0] * self.rolling_pts
-        self.integral = 0.0
-        self.error = 0.0
-        self.derivative = 0.0 
-        self.vel = 0.0
+        #self.previous_error = 0.0
+        #self.prev_vel = [0.0] * self.rolling_pts
+        #self.integral = 0.0
+        #self.error = 0.0
+        #self.derivative = 0.0 
+        #self.vel = 0.0
         
         # only do the loop if we've recently recieved a target velocity message
         while not rospy.is_shutdown() and self.ticks_since_target < self.timeout_ticks:
             self.calcVelocity()
             self.doPid()
-            self.pub_motor.publish(self.motor)
+            self.pub_motor.publish(self.motor * 15000)
             self.r.sleep()
             self.ticks_since_target += 1
-            if self.ticks_since_target == self.timeout_ticks:
-                self.pub_motor.publish(0)
+            #if self.ticks_since_target == self.timeout_ticks:
+                #self.pub_motor.publish(0)
             
     #####################################################
     def calcVelocity(self):

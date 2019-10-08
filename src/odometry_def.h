@@ -1,0 +1,12 @@
+#define PI 3.141592653
+
+// encoder
+#define ENCODER_PULSES 1920.0
+#define WHEEL_RAD 0.032
+#define WHEEL_SEP 0.190
+
+#define ENCODER_PUBLISHER_TIMER 0.02
+#define TF_PUBLISHER_TIMER 0.02
+
+#define MAX_ENCODER_DIFF 5000
+

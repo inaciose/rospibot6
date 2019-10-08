@@ -17,7 +17,6 @@
   <rosparam param="ticks_meter">4630</rosparam>
 
   <!--<include file="$(find rospibot6)/launch/diff_tf.launch"/>-->
-
   <node name="diff_tf" pkg="rospibot6" type="diff_tf.py" output="screen">
     <rosparam param="ticks_meter">4630</rosparam>
     <rosparam param="base_width">0.20</rosparam>
@@ -66,7 +65,6 @@
     <rosparam param="rolling_pts">4</rosparam>
   </node>
 
-  <!-- Start 2 nodes: joint_state_publisher, robot_state_publisher -->
   <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
   <node name="robot_state_publisher" pkg="robot_state_publisher" type="state_publisher" />
 
@@ -82,8 +80,8 @@
     <param name="throttle_scans" type="int" value="1" />
 
     <!-- laser config -->
-    <!--<param name="maxUrange" type="double" value="10.0" />-->
-    <!--<param name="maxRange" type="double" value="11.0" />-->
+    <param name="maxUrange" type="double" value="10.0" />
+    <param name="maxRange" type="double" value="11.0" />
 
     <!-- map size & resolution-->
     <param name="xmin" type="double" value="-20.0" />
@@ -109,15 +107,27 @@
     <rosparam file="$(find rospibot6)/param/move_base_params.yaml" command="load" />
   </node>
 
-  <node name="base_node" pkg="rospibot6" type="base3" output="screen">
+  <node pkg="robot_pose_ekf" type="robot_pose_ekf" name="robot_pose_ekf">
+    <param name="output_frame" value="odom"/>
+    <param name="freq" value="30.0"/>
+    <param name="sensor_timeout" value="1.0"/>
+    <param name="odom_used" value="true"/>
+    <param name="imu_used" value="true"/>
+    <param name="vo_used" value="false"/>
+    <param name="debug" value="false"/>
+    <param name="self_diagnose" value="false"/>
+  </node>
+
+  <node name="base_node" pkg="rospibot6" type="base4"  respawn="true" respawn_delay="30" output="screen">
     <!--<rosparam file="$(find mypackage)/config/example.yaml" command="load" />-->
     <remap from="wheel_left" to="lwheel"/>
     <remap from="wheel_right" to="rwheel"/>
-    <param name="frequency" type="int" value="20" />
+    <param name="frequency" type="int" value="100" />
     <param name="pid_enabled" type="bool" value="0" />
+    <param name="odom_enabled" type="bool" value="0" />
     <!-- BASE -->
-    <param name="wheel_rad" type="double" value="0.033" />
-    <param name="wheel_sep" type="double" value="0.20" />
+    <param name="wheel_rad" type="double" value="0.032" />
+    <param name="wheel_sep" type="double" value="0.190" />
     <param name="wheel_encoder_pulses" type="double" value="960.0" />
     <!-- PID -->
     <param name="pid_out_trh" type="double" value="0.0" />

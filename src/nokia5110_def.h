@@ -11,24 +11,6 @@
 #define LCD_CLKCONST_2 400
 #define LCD_LSBFIRST 0
 #define LCD_MSBFIRST 1
-//#define TRUE    1
-//#define FALSE    0
-//#define LCD_MAXTIMINGS      100
-
-/*
-void lcdShiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t val);
-void lcdWrite(uint8_t dc, uint8_t data);
-void lcdBackLight (bool state);
-void lcdGotoXY(int x, int y);
-void lcdCharacter(char character);
-void lcdClear(void);
-void lcdCreate(unsigned char rst, unsigned char ce, unsigned char dc, unsigned char din, unsigned char clk, unsigned char bl);
-void lcdReset(void);
-void lcdInit(void);
-void lcdString(char *characters);
-void lcdStringln(char *characters);
-//void lcdScroll(char message[]);
-*/
 
 static const char ASCII[][5] = {
          {0x00, 0x00, 0x00, 0x00, 0x00} // 20

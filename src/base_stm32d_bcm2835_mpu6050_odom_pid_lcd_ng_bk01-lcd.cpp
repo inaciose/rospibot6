@@ -5,6 +5,7 @@
 #include <string.h>
 #include <math.h>
 #include <signal.h>
+#include <stdbool.h>
 
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
@@ -22,17 +23,101 @@
 #include <tf/transform_broadcaster.h>
 #include <nav_msgs/Odometry.h>
 
+#include <vector>
+#include <iostream>
+#include <std_msgs/MultiArrayLayout.h>
+#include <std_msgs/MultiArrayDimension.h>
+#include <std_msgs/Int32MultiArray.h>
+
+// lcd
+#include "nokia5110.h"
+#include "nokia5110_lcdmenu.h"
+
+// ip address
+//#include <sys/types.h>
+//#include <sys/socket.h>
+//#include <sys/ioctl.h>
+//#include <netinet/in.h>
+//#include <net/if.h>
+//#include <arpa/inet.h>
+
+// uptime
+//#include <sys/sysinfo.h>
+
+// shutdown and reboot
+//#include <sys/reboot.h>
+
+#include "system.h"
+#include "commands.h"
+#include "globals.h"
+
+// i2c
 #include "I2Cdev.h"
+
+// mpu6050 DMP
 #include "MPU6050_6Axis_MotionApps20.h"
 
-#define ENCODER_PULSES 960.0
+// allow to use other nodes
+bool pidComputeEnabled = false;
+bool odomPublishEnabled = false;
+bool cmdVelComputeEnabled = false;
+
+// LCD pins
+#define LCD_PIN_BL    21
+#define LCD_PIN_SCE   8
+#define LCD_PIN_RESET 24
+#define LCD_PIN_DC    23
+#define LCD_PIN_SDIN  10
+#define LCD_PIN_SCLK  11
+
+#define LCD_TIMER 1
+#define LCD_BACKLIGHT_TIMER 30
+
+double lcdTimer;
+double lcdBacklightTimer;
+bool lcdBacklightStatus = false;
+
+// push buttons
+#define BTN_NUM 6
+
+// push buttons labels
+#define BTN_BUP    2
+#define BTN_BDN    3
+#define BTN_BLF    4
+#define BTN_BRT    5
+#define BTN_BNO    0
+#define BTN_BOK    1
+
+// push buttons pins
+#define BTN_PIN_BUP    25
+#define BTN_PIN_BDN    27
+#define BTN_PIN_BLF    20
+#define BTN_PIN_BRT    17
+#define BTN_PIN_BNO    18
+#define BTN_PIN_BOK    22
+
+#define BTN_TIMER 0.005
+#define BTN_ON_TIMER 0.6
+
+bool btnStatus = false;
+double btnTimer;
+uint8_t btnState[BTN_NUM];
+
+// lcd  menu
+#define MENU_MAX 3
+bool menuOn = false;
+uint8_t menu = 0;
+uint8_t menuselect[MENU_MAX+1][2] = {{0,3}, {0,3}, {0,2}, {0,1}}; // selected item , total_itens
+
+// encoder
+#define ENCODER_PULSES 1920.0
 #define WHEEL_RAD 0.032
 #define WHEEL_SEP 0.190
 
 #define PI 3.141592653
 
 #define ENCODER_PUBLISHER_TIMER 0.02
-//#define TF_PUBLISHER_TIMER 0.02
+#define TF_PUBLISHER_TIMER 0.02
 
 // units are m, m/s, radian/s
 double wheel_encoder_pulses = ENCODER_PULSES;
@@ -48,10 +133,26 @@ double pulses_per_m = 1.0 / wheel_per * wheel_encoder_pulses;
 long encoderLeftPulses;
 long encoderRightPulses;
 
+long encoderLeftPulsesTarget = 0;
+long encoderRightPulsesTarget = 0;
+long encoderLeftPulsesTargetStart = 0;
+long encoderRightPulsesTargetStart = 0;
+
+bool encoderLeftPulsesOnTarget = false;
+bool encoderRightPulsesOnTarget = false;
+bool encoderPulsesTargetEnabled = false;
+
+int encoderLeftTargetDirection = 0;
+int encoderRightTargetDirection = 0;
+
 // twist, pwm & pid variables
-bool pidComputeEnabled = true;
 double cmd_vel_x, cmd_vel_z;
 double leftMotorSpeedRequest,rightMotorSpeedRequest;
+int leftMotorSpeedRequestPulses, rightMotorSpeedRequestPulses;
+int maxSpeedPulses = 45; //TODO
+double cmd_vel_k = 1.0;
+double odom_pose_covariance, odom_pose_stdev_;
+double odom_twist_covariance, odom_twist_stdev_;
 
 long encoderLeftPulsesLast;
 long encoderRightPulsesLast;
@@ -72,7 +173,7 @@ double leftPidPwm, rightPidPwm;
 #define PID_OUT_MIN 0
 #define PID_OUT_MAX 32000
 #define PID_OUT_K 1
-#define PID_SAMPLE_TIME 0.050
+#define PID_SAMPLE_TIME 0.025
 
 double pidOutTrh = PID_OUT_TRH;
 double pidOutMin = PID_OUT_MIN;
@@ -92,20 +193,20 @@ double kdRight = 0;
 // control variables
 bool newCmdVel = false;
 double encoderPublisherTimer;
-//double tfPublisherTimer;
+double tfPublisherTimer;
 
 // odometry
-//double bodyX;
-//double bodyY;
-//double bodyTheta;
+double bodyX;
+double bodyY;
+double bodyTheta;
 
 // odometry encoder variables
-//long encoderLeftPulsesOdomLast;
-//long encoderRightPulsesOdomLast;
+long encoderLeftPulsesOdomLast;
+long encoderRightPulsesOdomLast;
 
 // velocity
-//double odomXvel = 0;
-//double odomZvel = 0;
+double odomXvel = 0;
+double odomZvel = 0;
 
 //
 // MPU6050
@@ -186,10 +287,10 @@ ros::Publisher mag_pub;
 uint8_t i2c_buf[I2C_MAX_LEN];
 
 // data trasfer variables
-union u_tag {
-    uint8_t b[4];
-    int32_t i;
-};
+//union u_tag {
+//    uint8_t b[4];
+//    int32_t i;
+//};
 
 union u_tag pwm_data[8];
 union u_tag enc_data[8];
@@ -206,16 +307,14 @@ std_msgs::Int64 msgEnc;
 // OTHER
 //
 
-#define CMD_MCU_RESET_ENCODER 1
-#define CMD_MCU_SET_PWM 2
-#define CMD_MCU_LIDAR_MOTOR_ON 3
-#define CMD_MCU_LIDAR_MOTOR_OFF 4
-#define CMD_DEBUG_ON 100
-#define CMD_DEBUG_OFF 99
-
 union u_tag cmd_data[8];
 uint16_t cmd = 0;
 bool newCmd = false;
+
+bool lidarMotorStatus = false;
+
+bool newCmdMotion = false;
+int cmdMotion[64];
 
 // loop info for debug
 bool displayLoopInfo = false;
@@ -245,9 +344,35 @@ void cmdCallback(std_msgs::Int16 msg) {
     newCmd = true;
 }
 
+void cmdMotionCallback(const std_msgs::Int32MultiArray::ConstPtr& array) {
+    int i = 0;
+    for(std::vector<int>::const_iterator it = array->data.begin(); it != array->data.end(); ++it) {
+    	cmdMotion[i] = *it;
+    	i++;
+    }
+    //ROS_INFO("cmdMotionCallback: %d %d %d %d", cmdMotion[0], cmdMotion[1], cmdMotion[2], cmdMotion[3]);
+    newCmdMotion = true;
+}
+
 void mySigintHandler(int sig){
-    ROS_INFO("Shutting down mpu6050_node...");
+    ROS_INFO("Shutting down base_node...");
+    // stop lidar motor
+    uint8_t* dataptr = (uint8_t*)tmp_data;
+    dataptr++;
+
+    I2Cdev::writeBytes(I2CADDR_STM32, CMD_MCU_LIDAR_MOTOR_OFF, 3, dataptr);
+
+    // stop motors
+    dataptr = (uint8_t*)pwm_data;
+    dataptr++;
+
+    pwm_data[1].i = 0;
+    pwm_data[2].i = 0;
+    I2Cdev::writeBytes(I2CADDR_STM32, CMD_MCU_SET_PWM, 11, dataptr);
+
+    // reset mpu6050
     mpu.reset();
+
     // All the default sigint handler does is call shutdown()
     ros::shutdown();
 }
@@ -312,7 +437,8 @@ double computeRightPID(double inp) {
 // ===                        MAIN LOOP                         ===
 // ================================================================
 
-void loop(ros::NodeHandle pn, ros::NodeHandle n) {
+void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::TransformBroadcaster odom_broadcaster) {
+
     //
     // PROCESS MOTORS
     //
@@ -322,6 +448,45 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
     ros::Time current_time;
     static ros::Time last_time;
 
+    uint8_t* dataptr;
+
+    // process new motion commands
+    if(newCmdMotion) {
+	dataptr = (uint8_t*)tmp_data;
+        dataptr++;
+	switch(cmdMotion[0]) {
+	    case CMD_MCU_SET_MOTION:
+                // left encoder marks for debug
+                if(cmdMotion[1] >= 0) {
+                    encoderLeftPulsesTarget = encoderLeftPulses + cmdMotion[3];
+                    encoderLeftTargetDirection = 1;
+                } else {
+                    encoderLeftPulsesTarget = encoderLeftPulses - cmdMotion[3];
+                    encoderLeftTargetDirection = -1;
+                }
+                // right encoder marks for debug
+                if(cmdMotion[2] >= 0) {
+                    encoderRightPulsesTarget = encoderRightPulses + cmdMotion[3];
+                    encoderRightTargetDirection = 1;
+                } else {
+                    encoderRightPulsesTarget = encoderRightPulses - cmdMotion[3];
+                    encoderRightTargetDirection = -1;
+                }
+
+                encoderLeftPulsesTargetStart = encoderLeftPulses;
+                encoderRightPulsesTargetStart = encoderRightPulses;
+                encoderLeftPulsesOnTarget = false;
+                encoderRightPulsesOnTarget = false;
+                encoderPulsesTargetEnabled = true;
+	        tmp_data[1].i = cmdMotion[1];
+                tmp_data[2].i = cmdMotion[2];
+                tmp_data[3].i = cmdMotion[3];
+        	I2Cdev::writeBytes(I2CADDR_STM32, CMD_MCU_SET_MOTION, 15, dataptr);
+		break;
+	}
+        ROS_INFO("sendtomcu: %d %d %d %d", cmdMotion[0], cmdMotion[1], cmdMotion[2], cmdMotion[3]);
+	newCmdMotion = false;
+    }
 
     // publish encoders pulse count on timer
     if(ros::Time::now().toSec() > encoderPublisherTimer) {
@@ -348,6 +513,78 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
 	if(abs(tmp_data[1].i) - abs(enc_data[1].i) < MAX_ENCODER_DIFF ) {
 	    enc_data[1].i = tmp_data[1].i;
 	}
+
+        // set some vars for debug
+        if(encoderPulsesTargetEnabled) {
+            // check left encoder target
+            if(!encoderLeftPulsesOnTarget) {
+                if(encoderLeftTargetDirection >= 0) {
+                    if(encoderLeftPulses >= encoderLeftPulsesTarget) {
+                        encoderLeftPulsesOnTarget = true;
+                    }
+                } else {
+                    if(encoderLeftPulses < encoderLeftPulsesTarget) {
+                        encoderLeftPulsesOnTarget = true;
+                    }
+                }
+                // left stop on encoder target
+                if(encoderLeftPulsesOnTarget) {
+                    ROS_INFO("L ON TARGET");
+                    //leftMotorPwmOut = 0;
+                    //leftSpeedPidSetPoint = 0;
+                    //leftSpeedPidSetPointDirection = 0;
+                }
+            }
+
+            // check right encoder target
+            if(!encoderRightPulsesOnTarget) {
+                if(encoderRightTargetDirection >= 0) {
+                    if(encoderRightPulses >= encoderRightPulsesTarget) {
+                        encoderRightPulsesOnTarget = true;
+                    }
+                } else {
+                    if(encoderRightPulses < encoderRightPulsesTarget) {
+                        encoderRightPulsesOnTarget = true;
+                    }
+                }
+                // right stop on encoder target
+                if(encoderRightPulsesOnTarget) {
+                    ROS_INFO("R ON TARGET");
+                    //rightMotorPwmOut = 0;
+                    //rightSpeedPidSetPoint = 0;
+                    //rightSpeedPidSetPointDirection = 0;
+                }
+            }
+
+            // encoders on target
+            if(encoderLeftPulsesOnTarget && encoderRightPulsesOnTarget) {
+                ROS_INFO("BOTH ON TARGET1 %d %d %d %d %d", 
+                    (encoderLeftPulses - encoderLeftPulsesTargetStart) - (encoderRightPulses - encoderRightPulsesTargetStart),
+                    (encoderLeftPulses - encoderLeftPulsesTargetStart),
+                    (encoderRightPulses - encoderRightPulsesTargetStart),
+                    encoderLeftPulses, encoderRightPulses);
+
+                delay(125);
+
+                ROS_INFO("BOTH ON TARGET2 %d %d %d %d %d", 
+                    (encoderLeftPulses - encoderLeftPulsesTargetStart) - (encoderRightPulses - encoderRightPulsesTargetStart),
+                    (encoderLeftPulses - encoderLeftPulsesTargetStart),
+                    (encoderRightPulses - encoderRightPulsesTargetStart),
+                    encoderLeftPulses, encoderRightPulses);
+
+
+                encoderLeftPulsesTarget = 0;
+                encoderLeftPulsesOnTarget = false;
+                encoderRightPulsesTarget = 0;
+                encoderRightPulsesOnTarget = false;
+                encoderPulsesTargetEnabled = false;
+                encoderLeftPulsesTargetStart = 0;
+                encoderRightPulsesTargetStart = 0;
+                encoderLeftTargetDirection = 0;
+                encoderRightTargetDirection = 0;
+
+                }
+        }
 
 	// set some vars for pid
 	int encoderLeftUpdate = enc_data[0].i - encoderLeftPulsesLast;
@@ -397,6 +634,7 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
 	}
 
 	newPidPwm = true;
+
 	pidTimer = ros::Time::now().toSec() + PID_SAMPLE_TIME;
     }
 
@@ -418,44 +656,154 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
     }
 
     // update motors on new cmd_vel message
-    if(pidComputeEnabled && newCmdVel) {
+    if(cmdVelComputeEnabled && newCmdVel) {
 	// calculate motors speed
-	//leftMotorSpeedRequest = 1.0 * cmd_vel_x - cmd_vel_z * wheel_sep / 2;
-	//rightMotorSpeedRequest = 1.0 * cmd_vel_x + cmd_vel_z * wheel_sep / 2;
+	leftMotorSpeedRequest = 1.0 * cmd_vel_x - cmd_vel_z * wheel_sep / 2;
+	rightMotorSpeedRequest = 1.0 * cmd_vel_x + cmd_vel_z * wheel_sep / 2;
 
-	leftMotorSpeedRequest = (cmd_vel_x/wheel_per) - ((cmd_vel_z*wheel_sep)/wheel_per);
-	rightMotorSpeedRequest = (cmd_vel_x/wheel_per) + ((cmd_vel_z*wheel_sep)/wheel_per);
+	//leftMotorSpeedRequest = (cmd_vel_x/wheel_per) - ((cmd_vel_z*wheel_sep)/wheel_per);
+	//rightMotorSpeedRequest = (cmd_vel_x/wheel_per) + ((cmd_vel_z*wheel_sep)/wheel_per);
 
-	//ROS_INFO("conv1 vel: %f %f", leftMotorSpeedRequest, rightMotorSpeedRequest);
+	// convert to pulses  //TODO better
+	rightMotorSpeedRequestPulses = (rightMotorSpeedRequest * pulses_per_m / (1.0 / PID_SAMPLE_TIME)) * cmd_vel_k;
+	leftMotorSpeedRequestPulses = (leftMotorSpeedRequest * pulses_per_m / (1.0 /PID_SAMPLE_TIME)) * cmd_vel_k;
 
-	// convert to pulses
-	rightMotorSpeedRequest = rightMotorSpeedRequest * wheel_encoder_pulses / 1 * PID_SAMPLE_TIME;
-	leftMotorSpeedRequest = leftMotorSpeedRequest * wheel_encoder_pulses / 1 * PID_SAMPLE_TIME;
-
-	if(leftMotorSpeedRequest > 100) leftMotorSpeedRequest = 100;
-	if(rightMotorSpeedRequest > 100) rightMotorSpeedRequest = 100;
-
-	// set left motors direction and speed
-	if(leftMotorSpeedRequest > 0) {
-	  leftSpeedPidSetPoint = round(leftMotorSpeedRequest);
-	} else if(leftMotorSpeedRequest < 0) {
-	  leftSpeedPidSetPoint = round(abs(leftMotorSpeedRequest));
+	if(leftMotorSpeedRequestPulses < 0) {
+	    if(abs(leftMotorSpeedRequestPulses) > maxSpeedPulses) leftMotorSpeedRequestPulses = -maxSpeedPulses;
 	} else {
-	  leftSpeedPidSetPoint = round(leftMotorSpeedRequest);
+	   if(leftMotorSpeedRequestPulses > maxSpeedPulses) leftMotorSpeedRequestPulses = maxSpeedPulses;
 	}
 
-	// set right motors direction and speed
-	if(rightMotorSpeedRequest > 0) {
-	  rightSpeedPidSetPoint = round(rightMotorSpeedRequest);
-	} else if(rightMotorSpeedRequest < 0) {
-	  rightSpeedPidSetPoint = round(abs(rightMotorSpeedRequest));
-	} else {
-	  rightSpeedPidSetPoint = 0;
-	}
+        if(rightMotorSpeedRequestPulses < 0) {
+            if(abs(rightMotorSpeedRequestPulses) > maxSpeedPulses) rightMotorSpeedRequestPulses = -maxSpeedPulses;
+        } else {
+           if(rightMotorSpeedRequestPulses > maxSpeedPulses) rightMotorSpeedRequestPulses = maxSpeedPulses;
+        }
 
-	//ROS_INFO("Setpoint %f %f %f %f", leftMotorSpeedRequest, rightMotorSpeedRequest, leftSpeedPidSetPoint, rightSpeedPidSetPoint);
+        //ROS_INFO("Setpoint %f %f %d %d", leftMotorSpeedRequest, rightMotorSpeedRequest, leftMotorSpeedRequestPulses, rightMotorSpeedRequestPulses);
+
+	if(pidComputeEnabled) {
+	    // set left motors direction and speed
+	    if(leftMotorSpeedRequestPulses > 0) {
+	        leftSpeedPidSetPoint = round(leftMotorSpeedRequestPulses);
+	    } else if(leftMotorSpeedRequest < 0) {
+	        leftSpeedPidSetPoint = round(abs(leftMotorSpeedRequestPulses));
+	    } else {
+	      leftSpeedPidSetPoint = 0;
+	    }
+
+	    // set right motors direction and speed
+	    if(rightMotorSpeedRequest > 0) {
+	        rightSpeedPidSetPoint = round(rightMotorSpeedRequestPulses);
+	    } else if(rightMotorSpeedRequest < 0) {
+	        rightSpeedPidSetPoint = round(abs(rightMotorSpeedRequestPulses));
+	    } else {
+	        rightSpeedPidSetPoint = 0;
+	    }
+	} else {
+            dataptr = (uint8_t*)tmp_data;
+            dataptr++;
+            tmp_data[1].i = leftMotorSpeedRequestPulses;
+            tmp_data[2].i = rightMotorSpeedRequestPulses;
+            I2Cdev::writeBytes(I2CADDR_STM32, CMD_MCU_SET_VEL, 11, dataptr);
+	}
 
 	newCmdVel = false;
+    }
+
+    // publish odometry on timer
+    if(odomPublishEnabled && (ros::Time::now().toSec() > tfPublisherTimer)) {
+
+	current_time = ros::Time::now();
+	double elapsed = (last_time - current_time).toSec();
+	last_time  = current_time;
+
+	//float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) * distancePerPulse;
+	//float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) * distancePerPulse;
+
+        float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) / pulses_per_m;
+        float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) / pulses_per_m;
+
+	encoderLeftPulsesOdomLast = encoderLeftPulses;
+	encoderRightPulsesOdomLast = encoderRightPulses;
+
+	// distance traveled is the average of the two wheels
+	float d = ( d_left + d_right ) / 2;
+
+	// this approximation works (in radians) for small angles
+	float th = ( d_right - d_left ) / wheel_sep;
+
+	// calculate velocities
+	odomXvel = d / elapsed;
+	odomZvel = th / elapsed;
+
+	if(d != 0) {
+	    // calculate distance traveled in x and y
+	    double x = cos(th) * d;
+	    double y = -sin(th) * d;
+	    //calculate the final position of the robot
+	    bodyX = bodyX + (cos(bodyTheta) * x - sin(bodyTheta) * y);
+	    bodyY = bodyY + (sin(bodyTheta) * x + cos(bodyTheta) * y);
+	}
+
+	if(th != 0) {
+	    bodyTheta = bodyTheta + th;
+	}
+
+	//ROS_INFO("odom: %f %f %f %f %f %f %f", bodyX, bodyY, bodyTheta, d_left, d_right, d, th);
+
+	//since all odometry is 6DOF we'll need a quaternion created from yaw
+	geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(bodyTheta);
+
+	//first, we'll publish the transform over tf
+	geometry_msgs::TransformStamped odom_trans;
+	odom_trans.header.stamp = current_time;
+	odom_trans.header.frame_id = "odom";
+	odom_trans.child_frame_id = "base_link";
+
+	odom_trans.transform.translation.x = bodyX;
+	odom_trans.transform.translation.y = bodyY;
+	odom_trans.transform.translation.z = 0.0;
+	odom_trans.transform.rotation = odom_quat;
+
+	//send the transform
+	odom_broadcaster.sendTransform(odom_trans);
+
+	//next, we'll publish the odometry message over ROS
+	nav_msgs::Odometry odom;
+	odom.header.stamp = current_time;
+	odom.header.frame_id = "odom";
+
+	//set the position
+	odom.pose.pose.position.x = bodyX;
+	odom.pose.pose.position.y = bodyY;
+	odom.pose.pose.position.z = 0.0;
+	odom.pose.pose.orientation = odom_quat;
+
+	// non zero covariance diagonal for efk
+        odom.pose.covariance[0] = odom_pose_covariance;
+        odom.pose.covariance[7] = odom_pose_covariance;
+        odom.pose.covariance[14] = odom_pose_covariance;
+        odom.pose.covariance[21] = odom_pose_covariance;
+        odom.pose.covariance[28] = odom_pose_covariance;
+        odom.pose.covariance[35] = odom_pose_covariance;
+
+	//set the velocity
+	odom.child_frame_id = "base_link";
+	odom.twist.twist.linear.x = odomXvel;
+	odom.twist.twist.linear.y = 0;
+	odom.twist.twist.angular.z = odomZvel;
+
+        // non zero covariance diagonal for efk
+        odom.twist.covariance[0] = odom_twist_covariance;
+        odom.twist.covariance[7] = odom_twist_covariance;
+        odom.twist.covariance[14] = odom_twist_covariance;
+        odom.twist.covariance[21] = odom_twist_covariance;
+        odom.twist.covariance[28] = odom_twist_covariance;
+        odom.twist.covariance[35] = odom_twist_covariance;
+
+	//publish the message
+	odom_pub.publish(odom);
     }
 
     //
@@ -479,6 +827,10 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
           if(cmd == CMD_MCU_RESET_ENCODER) {
               encoderLeftPulsesLast = 0;
               encoderRightPulsesLast = 0;
+	  } else if(cmd == CMD_MCU_LIDAR_MOTOR_ON) {
+	      lidarMotorStatus = true;
+          } else if(CMD_MCU_LIDAR_MOTOR_OFF) {
+              lidarMotorStatus = false;
 	  }
 
           break;
@@ -487,10 +839,96 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
       cmd = 0;
     }
 
+    //
+    // PROCESS BUTTONS
+    //
+
+    if(!btnStatus && (ros::Time::now().toSec() > btnTimer)) {
+
+        btnState[BTN_BUP] = !bcm2835_gpio_lev(BTN_PIN_BUP);
+        btnState[BTN_BDN] = !bcm2835_gpio_lev(BTN_PIN_BDN);
+        btnState[BTN_BLF] = !bcm2835_gpio_lev(BTN_PIN_BLF);
+        btnState[BTN_BRT] = !bcm2835_gpio_lev(BTN_PIN_BRT);
+        btnState[BTN_BNO] = !bcm2835_gpio_lev(BTN_PIN_BNO);
+        btnState[BTN_BOK] = !bcm2835_gpio_lev(BTN_PIN_BOK);
+
+        //printf("%d %d %d %d %d %d\n", btnState[BTN_BUP], btnState[BTN_BDN], btnState[BTN_BLF], btnState[BTN_BRT], btnState[BTN_BNO], btnState[BTN_BOK]);
+
+	// buttons imediate actions
+        if(menuOn) {
+            if(btnState[BTN_BNO]) {
+                lcdBackLight(0);
+                lcdBacklightStatus = true;
+	        lcdBacklightTimer = ros::Time::now().toSec() + LCD_BACKLIGHT_TIMER;
+            }
+            if(btnState[BTN_BOK]) {
+                menuOn = false;
+            }
+        } else {
+            if(btnState[BTN_BNO]) {
+                lcdBackLight(0);
+                lcdBacklightStatus = true;
+                lcdBacklightTimer = ros::Time::now().toSec() + LCD_BACKLIGHT_TIMER;
+            }
+            if(btnState[BTN_BOK]) {
+                menuOn = true;
+            }
+        }
+
+	// check for any button pressed
+        int ttl = 0;
+	for(int f = 0; f < BTN_NUM; f++) {
+	    ttl += btnState[f];
+	}
+
+        if(ttl == 0) {
+	    // no button
+       	    btnTimer = ros::Time::now().toSec() + BTN_TIMER;
+	} else {
+	    // button pressed
+            //printf("%d %d %d %d %d %d %d %d\n", menuOn, menu, btnState[BTN_BUP], btnState[BTN_BDN], btnState[BTN_BLF], btnState[BTN_BRT], btnState[BTN_BNO], btnState[BTN_BOK]);
+            //btnTimer = ros::Time::now().toSec() + BTN_ON_TIMER;
+            btnTimer = ros::Time::now().toSec() + BTN_TIMER;
+	    btnStatus = true;
+	}
+    }
+
+    //
+    // PROCESS MENU & LCD UPDATE
+    //
+
+    // backlight
+    if(lcdBacklightStatus && ros::Time::now().toSec() > lcdBacklightTimer) {
+	lcdBackLight(1);
+	lcdBacklightStatus = false;
+    }
+
+    if(ros::Time::now().toSec() > lcdTimer) {
+        if(menuOn) {
+            switch(menu) {
+	        case 0: lcdMenu(); break;
+                case 1: lcdMenu1(); break;
+                case 2: lcdMenu2(); break;
+            }
+        } else {
+            lcdHome(pn,n);
+            //bcm2835_delay(800);
+        }
+
+        //reset button status
+	btnStatus = false;
+        //for(int f = 0; f < BTN_NUM; f++) {
+        //    btnState[f] = 0;
+        //}
+
+        lcdTimer = ros::Time::now().toSec() + LCD_TIMER;
+    }
+
+    //
+    // PROCESS IMU
+    //
+
     if(ros::Time::now().toSec() > imuPublisherTimer) {
-	//
-	// PROCESS IMU
-	//
 
 	// if programming failed, don't try to do anything
 	if (!dmpReady) return;
@@ -610,7 +1048,7 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n) {
 
 int main(int argc, char **argv){
 
-    ros::init(argc, argv, "base3");
+    ros::init(argc, argv, "base5");
 
     // Allows parameters passed in via <param>
     ros::NodeHandle pn("~");
@@ -620,7 +1058,7 @@ int main(int argc, char **argv){
 
     signal(SIGINT, mySigintHandler);
 
-    ROS_INFO("Starting base_node...");
+    ROS_INFO("Starting base node...");
 
     //
     // SETUP BASE PARAMETERS
@@ -628,6 +1066,15 @@ int main(int argc, char **argv){
 
     pn.param<bool>("pid_enabled", pidComputeEnabled, 0);
     std::cout << "pid_enabled: " << pidComputeEnabled << std::endl;
+
+    pn.param<bool>("odom_enabled", odomPublishEnabled, 0);
+    std::cout << "odom_enabled: " << odomPublishEnabled << std::endl;
+
+    pn.param<bool>("cmdvel_enabled", cmdVelComputeEnabled, 0);
+    std::cout << "cmdvel_enabled: " << cmdVelComputeEnabled << std::endl;
+
+    pn.param<double>("cmdvel_k", cmd_vel_k, 1.0);
+    std::cout << "cmdvel_k: " << cmd_vel_k << std::endl;
 
     // units are m, m/s, radian/s
     pn.param<double>("wheel_rad", wheel_rad, WHEEL_RAD);
@@ -692,6 +1139,7 @@ int main(int argc, char **argv){
     // SETUP IMU PARAMETERS
     //
 
+    //TODO
     pn.param<int>("frequency", sample_rate, DEFAULT_SAMPLE_RATE_HZ);
     std::cout << "Using sample rate: " << sample_rate << std::endl;
 
@@ -750,37 +1198,57 @@ int main(int argc, char **argv){
     pwm_data[1].i = 0;
 
     //
-    // SETUP OTHER
+    // OTHER SETUP
     //
-    ros::Subscriber cmd_sub = n.subscribe("cmd", 100, cmdCallback);
+
+    // general commands subscriber
+    ros::Subscriber cmd_sub = n.subscribe("cmd", 10, cmdCallback);
     for(int i = 0; i < 8; i++) cmd_data[i].i = 0;
 
-    // setup ros subscribers
-    if(pidComputeEnabled) {
-        ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 1000, twistCallback);
-    }
+    // command velocity subscriber
+//    if(cmdVelComputeEnabled) {
+	ROS_INFO("enable cmd_vel subscribe");
+        ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 50, twistCallback);
+//    }
+
+    // command motion subscriber
+    ros::Subscriber cmd_motion_sub = n.subscribe("cmd_motion", 10, cmdMotionCallback);
+
+    //
+    // ODOMETRY 
+    //
+    odom_pose_stdev_ = 0.2;
+    odom_twist_stdev_ = 0.2;
+
+    odom_pose_covariance = odom_pose_stdev_ * odom_pose_stdev_;
+    odom_twist_covariance = odom_twist_stdev_ * odom_twist_stdev_;
+
+    //if(odomPublishEnabled) {
+        ros::Publisher odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
+        //odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
+        tf::TransformBroadcaster odom_broadcaster;
+    //}
 
     // setup other ros variables
-    ros::Rate loop_rate(100);
+    ros::Rate loop_rate(100); //TODO
     encoderPublisherTimer = ros::Time::now().toSec();
+    tfPublisherTimer = ros::Time::now().toSec();
 
     // setup pid
     leftSpeedPidSetPoint = 0;
     rightSpeedPidSetPoint = 0;
     pidTimer = ros::Time::now().toSec();
 
-    // imu timer
-    imuPublisherTimer = ros::Time::now().toSec();
-
-    //ros::Time current_time;
-    //static ros::Time last_time;
-
-    // ================================================================
-    // ===                    INU INITIAL SETUP                       ===
-    // ================================================================
+    //
+    // START I2C
+    //
 
     printf("Initializing I2C...\n");
     I2Cdev::initialize();
+
+    //
+    // MPU6050 SETUP
+    //
 
     // verify connection
     printf("Testing device connections...\n");
@@ -847,20 +1315,72 @@ int main(int argc, char **argv){
     imu_euler_pub = n.advertise<geometry_msgs::Vector3Stamped>("imu/euler", 10);
     mag_pub = n.advertise<geometry_msgs::Vector3Stamped>("imu/mag", 10);
 
-    // reset encoders
-    uint8_t* dataptr2 = (uint8_t*)cmd_data;
-    dataptr2++;
+    // imu timer
+    imuPublisherTimer = ros::Time::now().toSec();
 
-    I2Cdev::writeBytes(I2CADDR_STM32, CMD_MCU_RESET_ENCODER, 3, dataptr2);
+    //
+    // SET OTHERS I2C DEVICES
+    //
+
+    // reset encoders
+    uint8_t* dataptr = (uint8_t*)cmd_data;
+    dataptr++;
+
+    I2Cdev::writeBytes(I2CADDR_STM32, CMD_MCU_RESET_ENCODER, 3, dataptr);
 
     encoderLeftPulsesLast = 0;
     encoderRightPulsesLast = 0;
 
-    ros::Rate r(sample_rate);
+    // stop lidar motor
+    dataptr = (uint8_t*)tmp_data;
+    dataptr++;
+
+    I2Cdev::writeBytes(I2CADDR_STM32, CMD_MCU_LIDAR_MOTOR_OFF, 3, dataptr);
+    lidarMotorStatus = false;
+
+    //
+    // PUSH BUTTONS
+    //
+
+    // Set RPI pins to be an input
+    bcm2835_gpio_fsel(BTN_PIN_BUP, BCM2835_GPIO_FSEL_INPT);
+    bcm2835_gpio_fsel(BTN_PIN_BDN, BCM2835_GPIO_FSEL_INPT);
+    bcm2835_gpio_fsel(BTN_PIN_BLF, BCM2835_GPIO_FSEL_INPT);
+    bcm2835_gpio_fsel(BTN_PIN_BRT, BCM2835_GPIO_FSEL_INPT);
+    bcm2835_gpio_fsel(BTN_PIN_BNO, BCM2835_GPIO_FSEL_INPT);
+    bcm2835_gpio_fsel(BTN_PIN_BOK, BCM2835_GPIO_FSEL_INPT);
+
+    // set pins with a pullup
+    bcm2835_gpio_set_pud(BTN_PIN_BUP, BCM2835_GPIO_PUD_UP);
+    bcm2835_gpio_set_pud(BTN_PIN_BDN, BCM2835_GPIO_PUD_UP);
+    bcm2835_gpio_set_pud(BTN_PIN_BLF, BCM2835_GPIO_PUD_UP);
+    bcm2835_gpio_set_pud(BTN_PIN_BRT, BCM2835_GPIO_PUD_UP);
+    bcm2835_gpio_set_pud(BTN_PIN_BNO, BCM2835_GPIO_PUD_UP);
+    bcm2835_gpio_set_pud(BTN_PIN_BOK, BCM2835_GPIO_PUD_UP);
+
+    btnTimer = ros::Time::now().toSec();
+
+    //
+    // LCD
+    //
+
+    // set the nokia 5110 lcd pins on bcm2835
+    lcdCreate(LCD_PIN_RESET, LCD_PIN_SCE, LCD_PIN_DC, LCD_PIN_SDIN, LCD_PIN_SCLK, LCD_PIN_BL);
+
+    // start the lcd
+    lcdInit();
+
+    // disable backlight
+    lcdBackLight (1);
+
+    // set the lcd update timer
+    lcdTimer = ros::Time::now().toSec();
+
+    ros::Rate r(sample_rate); //TODO
     while(ros::ok()){
-        loop(pn, n);
+        loop(pn, n, odom_pub, odom_broadcaster);
         ros::spinOnce();
-        r.sleep();
+        r.sleep(); //TODO
     }
 
     std::cout << "Shutdown." << std::endl << std::flush;
