@@ -213,6 +213,7 @@ add_executable(base5
 target_link_libraries(base5
    ${catkin_LIBRARIES}
    bcm2835
+   /home/ubuntu/catkin_ws/src/rospibot6/src/lib-pca9685/lib_linux/libpca9685.a
 )
 
 add_executable(odomtest1 src/odomtest1.cpp) 

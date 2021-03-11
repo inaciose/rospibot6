@@ -16,7 +16,7 @@ double rightMotorSpeedRequest;
 int leftMotorSpeedRequestPulses;
 int rightMotorSpeedRequestPulses;
 
-int maxSpeedPulses = 45; //TODO
+int maxSpeedPulses = 500; //TODO
 double cmd_vel_k = 1.0;
 
 void difftwist_ros_params_setup(ros::NodeHandle pn) {

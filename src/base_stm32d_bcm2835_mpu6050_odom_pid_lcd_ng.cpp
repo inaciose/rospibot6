@@ -29,67 +29,53 @@
 #include <std_msgs/MultiArrayDimension.h>
 #include <std_msgs/Int32MultiArray.h>
 
-// lcd
-#include "nokia5110.h"
-#include "nokia5110_lcdmenu_def.h"
-#include "nokia5110_lcdmenu_globals.h"
-#include "nokia5110_lcdmenu.h"
-
+// general
 #include "system.h"
 #include "commands_def.h"
 #include "globals.h"
 
 // i2c
 #include "I2Cdev.h"
+#include "mcu.h"
+uint8_t i2c_buf[I2C_MAX_LEN];
 
-// allow to use other nodes
-bool pidComputeEnabled = false;
-bool odomPublishEnabled = false;
-bool cmdVelComputeEnabled = false;
+// lcd
+#include "nokia5110.h"
+#include "nokia5110_lcdmenu_def.h"
+#include "nokia5110_lcdmenu_globals.h"
+#include "nokia5110_lcdmenu.h"
 
 double lcdTimer;
 double lcdBacklightTimer;
-//bool lcdBacklightStatus = false;
-
-//bool btnStatus = false;
 double btnTimer;
-//uint8_t btnState[BTN_NUM];
-
-// lcd  menu
-//#define MENU_MAX 3
-//bool menuOn = false;
-//uint8_t menu = 0;
-//uint8_t menuselect[MENU_MAX+1][2] = {{0,3}, {0,3}, {0,2}, {0,1}}; // selected item , total_itens
 
 // encoder
 #include "odometry.h"
 #include "odometry_def.h"
 #include "odometry_globals.h"
 
-// units are m, m/s, radian/s
-
+// twist, pwm & pid variables
 #include "difftwist.h"
 #include "difftwist_globals.h"
-
-// twist, pwm & pid variables
 double cmd_vel_x, cmd_vel_z;
-//double leftMotorSpeedRequest,rightMotorSpeedRequest;
-//int leftMotorSpeedRequestPulses, rightMotorSpeedRequestPulses;
-//int maxSpeedPulses = 45; //TODO
-//double cmd_vel_k = 1.0;
-
-double pidTimer;
-bool newPidPwm = false;
-double leftPidPwm, rightPidPwm;
 
 #include "pid.h"
 #include "pid_def.h"
 #include "pid_globals.h"
 
+double pidTimer;
+bool newPidPwm = false;
+double leftPidPwm, rightPidPwm;
+
 // control variables
 bool newCmdVel = false;
 double encoderPublisherTimer;
 double tfPublisherTimer;
+
+// allow external modules
+bool pidComputeEnabled = false;
+bool odomPublishEnabled = false;
+bool cmdVelComputeEnabled = false;
 
 //
 // MPU6050
@@ -114,18 +100,6 @@ ros::Publisher mag_pub;
 //
 // MOTORS
 //
-//#define MAX_ENCODER_DIFF 5000
-
-#include "mcu.h"
-//#define I2CADDR_STM32 0x0b
-//#define I2C_MAX_LEN 32
-uint8_t i2c_buf[I2C_MAX_LEN];
-
-// data trasfer variables
-//union u_tag {
-//    uint8_t b[4];
-//    int32_t i;
-//};
 
 union u_tag pwm_data[8];
 union u_tag enc_data[8];
@@ -146,13 +120,21 @@ union u_tag cmd_data[8];
 uint16_t cmd = 0;
 bool newCmd = false;
 
-bool lidarMotorStatus = false;
+#include "lib-pca9685/include/pca9685servo.h"
+uint16_t servoCmd = 0;
+bool newServoCmd = false;
+// setup servo
+//PCA9685Servo servo;
 
+//
+bool lidarMotorStatus = false;
+//
 bool newCmdMotion = false;
 int cmdMotion[64];
 
-// loop info for debug
+// display info for debug
 bool displayLoopInfo = false;
+bool displayDebugOdom = false;
 
 void leftPwmCallback(std_msgs::Float32 msg) {
     //ROS_INFO("motorLeftCallback: %f", msg.data);
@@ -189,6 +171,12 @@ void cmdMotionCallback(const std_msgs::Int32MultiArray::ConstPtr& array) {
     newCmdMotion = true;
 }
 
+void servoCallback(std_msgs::Int16 msg) {
+    //ROS_INFO("servoCallback: %f", msg.data);
+    servoCmd = (int16_t)msg.data;
+    newServoCmd = true;
+}
+
 void mySigintHandler(int sig){
     ROS_INFO("Shutting down base_node...");
     // stop lidar motor
@@ -217,7 +205,7 @@ void mySigintHandler(int sig){
 // ===                        MAIN LOOP                         ===
 // ================================================================
 
-void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::TransformBroadcaster odom_broadcaster) {
+void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::TransformBroadcaster odom_broadcaster, PCA9685Servo servo) {
 
     //
     // PROCESS MOTORS
@@ -344,7 +332,7 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
     }
 
     //
-    // SEND MCU COMMANDS
+    // PROCESS SIMPLE CMD & SEND MCU COMMANDS
     //
     res3 = 0;
     if(newCmd) {
@@ -352,8 +340,12 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
         case CMD_DEBUG_ON:
           displayLoopInfo = true;
           break;
+        case CMD_DEBUG_ODOM_ON:
+          displayDebugOdom = true;
+          break;
         case CMD_DEBUG_OFF:
           displayLoopInfo = false;
+          displayDebugOdom = false;
           break;
         default:
           // SEND MCU COMMANDS
@@ -375,6 +367,16 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
       newCmd = false;
       cmd = 0;
     }
+
+    // process servo
+    if(newServoCmd) {
+    // move servo
+      servo.SetAngle(CHANNEL(0), ANGLE(servoCmd));
+      newServoCmd = false;
+      //servoCmd = 0;
+    }
+
+
 
     // PROCESS BUTTONS
     if(!btnStatus && (ros::Time::now().toSec() > btnTimer)) {
@@ -412,10 +414,31 @@ void loop(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::Tr
 	imuPublisherTimer = ros::Time::now().toSec() + IMU_PUBLISHER_TIMER;
     }
 
-    if(displayLoopInfo) {
-      ROS_INFO("%d %f %f %d %d %d %d %f %f %f %f %d %d %d", cmd, cmd_vel_x, cmd_vel_z, pwm_data[1].i, pwm_data[2].i, enc_data[0].i, enc_data[1].i, leftSpeedPidInput, rightSpeedPidInput, leftSpeedPidSetPoint, rightSpeedPidSetPoint, res1, res2, res3);
-    }
+//extern int mcuSteeringPidError;
+//extern int mcuLeftPidError;
+//extern int mcuRightPidError;
+//extern double cmd_vel_x;
+//extern double cmd_vel_z;
+//extern double leftMotorSpeedRequest;
+//extern double rightMotorSpeedRequest;
+//int leftMotorSpeedRequestPulses;
+//int rightMotorSpeedRequestPulses;
 
+    static long tmpLpulsesLast = 0;
+    static long tmpRpulsesLast = 0;
+
+    if(displayLoopInfo) {
+        int tmpLpulses = encoderLeftPulses - tmpLpulsesLast;
+        int tmpRpulses = encoderRightPulses - tmpRpulsesLast;
+	tmpLpulsesLast = encoderLeftPulses;
+        tmpRpulsesLast = encoderRightPulses;
+
+        //ROS_INFO("%d %f %f %d %d %d %d %f %f %f %f %d %d %d", cmd, cmd_vel_x, cmd_vel_z, pwm_data[1].i, pwm_data[2].i, enc_data[0].i, enc_data[1].i, leftSpeedPidInput, rightSpeedPidInput, leftSpeedPidSetPoint, rightSpeedPidSetPoint, res1, res2, res3);
+	ROS_INFO("%f %f %f %f %d %d %d %d %d %d %d %d %d %d %d", cmd_vel_x, cmd_vel_z, leftMotorSpeedRequest, rightMotorSpeedRequest,
+            leftMotorSpeedRequestPulses, rightMotorSpeedRequestPulses, encoderLeftPulses, encoderRightPulses, tmpLpulses, tmpRpulses,
+	    mcuSteeringPidError, mcuLeftPidError, mcuRightPidError, pwm_data[1].i, pwm_data[2].i);
+
+    }
 }
 
 int main(int argc, char **argv){
@@ -460,9 +483,9 @@ int main(int argc, char **argv){
     std::cout << "wheel_encoder_pulses: " << wheel_encoder_pulses << std::endl;
 
     // stored for fast calculation
-    double wheel_per = 2 * PI * wheel_rad;
-    double distancePerPulse = wheel_per / wheel_encoder_pulses;
-    double pulses_per_m = (1.0 / wheel_per) * wheel_encoder_pulses;
+    wheel_per = 2 * PI * wheel_rad;
+    distancePerPulse = wheel_per / wheel_encoder_pulses;
+    pulses_per_m = (1.0 / wheel_per) * wheel_encoder_pulses;
 
     std::cout << "wheel_per: " << wheel_per << std::endl;
     std::cout << "distancePerPulse: " << distancePerPulse << std::endl;
@@ -504,13 +527,14 @@ int main(int argc, char **argv){
     for(int i = 0; i < 8; i++) cmd_data[i].i = 0;
 
     // command velocity subscriber
-//    if(cmdVelComputeEnabled) {
-	ROS_INFO("enable cmd_vel subscribe");
-        ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 50, twistCallback);
-//    }
+    ROS_INFO("enable cmd_vel subscribe");
+    ros::Subscriber cmd_vel_sub = n.subscribe("cmd_vel", 10, twistCallback);
 
     // command motion subscriber
     ros::Subscriber cmd_motion_sub = n.subscribe("cmd_motion", 10, cmdMotionCallback);
+
+    // servo angle subscriber
+    ros::Subscriber cmd_servo_sub = n.subscribe("cmd_servo", 10, servoCallback);
 
     //
     // ODOMETRY 
@@ -520,13 +544,10 @@ int main(int argc, char **argv){
     ros::Publisher odom_pub;
     tf::TransformBroadcaster odom_broadcaster;
     if(odomPublishEnabled) {
-        //ros::Publisher odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
         odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
-        //tf::TransformBroadcaster odom_broadcaster;
     }
 
     // setup other ros variables
-    ros::Rate loop_rate(100); //TODO
     encoderPublisherTimer = ros::Time::now().toSec();
     tfPublisherTimer = ros::Time::now().toSec();
 
@@ -581,9 +602,19 @@ int main(int argc, char **argv){
     // set the lcd update timer
     lcdTimer = ros::Time::now().toSec();
 
+    // setup servo
+    PCA9685Servo servo;
+
+    // MG90S Micro Servo
+    servo.SetLeftUs(700);
+    servo.SetRightUs(2400);
+    servo.Dump();
+    // move servo
+    servo.SetAngle(CHANNEL(0), ANGLE(90));
+
     ros::Rate r(sample_rate); //TODO
     while(ros::ok()){
-        loop(pn, n, odom_pub, odom_broadcaster);
+        loop(pn, n, odom_pub, odom_broadcaster, servo);
         ros::spinOnce();
         r.sleep(); //TODO
     }

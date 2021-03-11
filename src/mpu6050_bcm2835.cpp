@@ -175,7 +175,10 @@ void mpu6050_process(ros::NodeHandle pn, ros::NodeHandle n) {
         //
 
         // if programming failed, don't try to do anything
-        if (!dmpReady) return;
+        if (!dmpReady) {
+		ROS_INFO("IMU ERROR !!!!!!!!!!!!");
+		return;
+	}
 
         ros::Time now = ros::Time::now();
 
@@ -280,7 +283,9 @@ void mpu6050_process(ros::NodeHandle pn, ros::NodeHandle n) {
             imu_pub.publish(imu_msg);
 
             if(debug) printf("\n");
-        }
+        } else {
+		if(debug) printf("mpu else\n");
+	}
 
         //imuPublisherTimer = ros::Time::now().toSec() + IMU_PUBLISHER_TIMER;
 //    }

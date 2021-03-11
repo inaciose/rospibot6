@@ -36,3 +36,14 @@ extern double bodyTheta;
 extern double odomXvel;
 extern double odomZvel;
 
+// debug
+extern bool displayDebugOdom;
+
+// debug
+extern int mcuSteeringPidError;
+extern int mcuLeftPidError;
+extern int mcuRightPidError;
+
+//extern int leftTmpPulses; // last displacement = (encoderLeftPulses - encoderLeftPulsesTargetStart);
+//extern int rightTmpPulses // last displacemmen = (encoderRightPulses - encoderRightPulsesTargetStart);
+

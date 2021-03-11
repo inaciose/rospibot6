@@ -1,4 +1,4 @@
-#define IMU_PUBLISHER_TIMER 0.05
+#define IMU_PUBLISHER_TIMER 0.01
 
 //Typically, motion processing algorithms should be run at a high rate, often around 200Hz,
 //in order to provide accurate results with low latency. This is required even if the applica$
@@ -15,4 +15,3 @@
 //#define OUTPUT_READABLE_EULER
 #define OUTPUT_READABLE_YAWPITCHROLL
 #define OUTPUT_READABLE_REALACCEL
-

@@ -5,5 +5,6 @@
 #define CMD_MCU_SET_MOTION 5
 #define CMD_MCU_SET_VEL 6
 #define CMD_DEBUG_ON 100
+#define CMD_DEBUG_ODOM_ON 101
 #define CMD_DEBUG_OFF 99
 

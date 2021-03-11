@@ -57,13 +57,19 @@ double bodyTheta;
 double odomXvel = 0;
 double odomZvel = 0;
 
+// debug
+int mcuSteeringPidError;
+int mcuLeftPidError;
+int mcuRightPidError;
+
 void read_i2c_encoders() {
 	int i;
     	uint8_t res1;
 	uint8_t i2c_buf[I2C_MAX_LEN];
         // read encoders from slave
         for (i = 0; i < I2C_MAX_LEN; i++) i2c_buf[i] = 0;
-        res1 = I2Cdev::readBytes(I2CADDR_STM32, 0, 12, i2c_buf);
+        //res1 = I2Cdev::readBytes(I2CADDR_STM32, 0, 12, i2c_buf);
+        res1 = I2Cdev::readBytes(I2CADDR_STM32, 0, 24, i2c_buf);
 
         // load values to int's
         tmp_data[0].b[0] = i2c_buf[0+4];
@@ -74,6 +80,19 @@ void read_i2c_encoders() {
         tmp_data[1].b[1] = i2c_buf[5+4];
         tmp_data[1].b[2] = i2c_buf[6+4];
         tmp_data[1].b[3] = i2c_buf[7+4];
+
+        tmp_data[2].b[0] = i2c_buf[8+4];
+        tmp_data[2].b[1] = i2c_buf[9+4];
+        tmp_data[2].b[2] = i2c_buf[10+4];
+        tmp_data[2].b[3] = i2c_buf[11+4];
+        tmp_data[3].b[0] = i2c_buf[12+4];
+        tmp_data[3].b[1] = i2c_buf[13+4];
+        tmp_data[3].b[2] = i2c_buf[14+4];
+        tmp_data[3].b[3] = i2c_buf[15+4];
+        tmp_data[4].b[0] = i2c_buf[16+4];
+        tmp_data[4].b[1] = i2c_buf[17+4];
+        tmp_data[4].b[2] = i2c_buf[18+4];
+        tmp_data[4].b[3] = i2c_buf[19+4];
 
         // try to filter some strange noise (values) from encoder readings
         if(abs(tmp_data[0].i) - abs(enc_data[0].i) < MAX_ENCODER_DIFF ) {
@@ -88,6 +107,11 @@ void read_i2c_encoders() {
         encoderLeftPulses = enc_data[0].i;
         encoderRightPulses = enc_data[1].i;
 
+	// set some var por mcu pid debug
+	mcuLeftPidError = tmp_data[2].i;
+        mcuRightPidError = tmp_data[3].i;
+        mcuSteeringPidError = tmp_data[4].i;
+
         // set some vars for pid
         int encoderLeftUpdate = enc_data[0].i - encoderLeftPulsesLast;
         int encoderRightUpdate = enc_data[1].i - encoderRightPulsesLast;
@@ -96,18 +120,39 @@ void read_i2c_encoders() {
         encoderLeftSpeedPidPulses += encoderLeftUpdate;
         encoderRightSpeedPidPulses += encoderRightUpdate;
 
-	//return res1;
+	// debug
+        int leftTmpPulses = (encoderLeftPulses - encoderLeftPulsesTargetStart);
+	int rightTmpPulses = (encoderRightPulses - encoderRightPulsesTargetStart);
 
+	static int leftPulsesLast = 0;
+        static int rightPulsesLast = 0;
+
+	static double hzTimer = 0;
+        static int leftHzPulsesLast = 0;
+        static int rightHzPulsesLast = 0;
+        int leftHzPulses = 0;
+        int rightHzPulses = 0;
+	static int leftHz = 0;
+	static int rightHz = 0;
+
+	if(ros::Time::now().toSec() > hzTimer) {
+		//ROS_INFO("hz: %d %d", leftHz, rightHz);
+		hzTimer = ros::Time::now().toSec() + 1;
+		leftHz = encoderLeftPulses - leftHzPulsesLast;
+                rightHz = encoderRightPulses - rightHzPulsesLast;
+        	leftHzPulsesLast = encoderLeftPulses;
+        	rightHzPulsesLast = encoderRightPulses;
+
+	}
 /*
-        // publish left encoder ros topic
-        msgEnc.data = enc_data[0].i;
-        left_encoder_pub.publish(msgEnc);
+        if(encoderLeftPulses != leftPulsesLast || encoderRightPulses != rightPulsesLast) {
+            if(encoderLeftPulses != leftPulsesLast) leftPulsesLast = encoderLeftPulses;
+            if(encoderRightPulses != rightPulsesLast) rightPulsesLast = encoderRightPulses;
+	    //ROS_INFO("enc: %d %d %d %d %d %d %d", mcuLeftPidError, mcuRightPidError, mcuSteeringPidError, encoderLeftPulses, encoderRightPulses, leftTmpPulses, rightTmpPulses);
+            ROS_INFO("enc: (%d %d %d) ( %d %d ) ( %d %d) %d %d", mcuLeftPidError, mcuRightPidError, mcuSteeringPidError, encoderLeftPulses, encoderRightPulses, leftTmpPulses, rightTmpPulses, leftHz, rightHz);
 
-        // publish right encoder  ros topic
-        msgEnc.data = enc_data[1].i;
-        right_encoder_pub.publish(msgEnc);
+	}
 */
-
 }
 
 void check_encoders_position() {
@@ -117,45 +162,28 @@ void check_encoders_position() {
             // check left encoder target
             if(!encoderLeftPulsesOnTarget) {
                 if(encoderLeftTargetDirection >= 0) {
-                    if(encoderLeftPulses >= encoderLeftPulsesTarget) {
-                        encoderLeftPulsesOnTarget = true;
-                    }
-                } else {
-                    if(encoderLeftPulses < encoderLeftPulsesTarget) {
-                        encoderLeftPulsesOnTarget = true;
-                    }
+                    if(encoderLeftPulses >= encoderLeftPulsesTarget) encoderLeftPulsesOnTarget = true;
+		} else {
+                    if(encoderLeftPulses < encoderLeftPulsesTarget) encoderLeftPulsesOnTarget = true;
                 }
                 // left stop on encoder target
                 if(encoderLeftPulsesOnTarget) {
                     ROS_INFO("L ON TARGET");
-                    //leftMotorPwmOut = 0;
-                    //leftSpeedPidSetPoint = 0;
-                    //leftSpeedPidSetPointDirection = 0;
                 }
             }
-
             // check right encoder target
             if(!encoderRightPulsesOnTarget) {
                 if(encoderRightTargetDirection >= 0) {
-                    if(encoderRightPulses >= encoderRightPulsesTarget) {
-                        encoderRightPulsesOnTarget = true;
-                    }
+                    if(encoderRightPulses >= encoderRightPulsesTarget) encoderRightPulsesOnTarget = true;
                 } else {
-                    if(encoderRightPulses < encoderRightPulsesTarget) {
-                        encoderRightPulsesOnTarget = true;
-                    }
+                    if(encoderRightPulses < encoderRightPulsesTarget) encoderRightPulsesOnTarget = true;
                 }
                 // right stop on encoder target
-                if(encoderRightPulsesOnTarget) {
-                    ROS_INFO("R ON TARGET");
-                    //rightMotorPwmOut = 0;
-                    //rightSpeedPidSetPoint = 0;
-                    //rightSpeedPidSetPointDirection = 0;
-                }
+                if(encoderRightPulsesOnTarget) ROS_INFO("R ON TARGET");
             }
-
             // encoders on target
             if(encoderLeftPulsesOnTarget && encoderRightPulsesOnTarget) {
+
                 ROS_INFO("BOTH ON TARGET1 %d %d %d %d %d", 
                     (encoderLeftPulses - encoderLeftPulsesTargetStart) - (encoderRightPulses - encoderRightPulsesTargetStart),
                     (encoderLeftPulses - encoderLeftPulsesTargetStart),
@@ -195,6 +223,7 @@ void odometry_ros_setup(ros::NodeHandle n, tf::TransformBroadcaster odom_broadca
 */
 
 void odometry_publish(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom_pub, tf::TransformBroadcaster odom_broadcaster) {
+
         ros::Time current_time;
         static ros::Time last_time;
 
@@ -204,6 +233,12 @@ void odometry_publish(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom
 
         //float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) * distancePerPulse;
         //float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) * distancePerPulse;
+
+	int leftTmp = encoderLeftPulses - encoderLeftPulsesOdomLast;
+	int rightTmp = encoderRightPulses - encoderRightPulsesOdomLast;
+	//if(leftTmp != 0 || rightTmp != 0) {
+        //    //ROS_INFO("odom1: %f %f %f %d %d", bodyX, bodyY, bodyTheta, (encoderLeftPulses - encoderLeftPulsesOdomLast), (encoderRightPulses - encoderRightPulsesOdomLast));
+	//}
 
         float d_left = (encoderLeftPulses - encoderLeftPulsesOdomLast) / pulses_per_m;
         float d_right = (encoderRightPulses - encoderRightPulsesOdomLast) / pulses_per_m;
@@ -234,7 +269,10 @@ void odometry_publish(ros::NodeHandle pn, ros::NodeHandle n, ros::Publisher odom
             bodyTheta = bodyTheta + th;
         }
 
-        //ROS_INFO("odom: %f %f %f %f %f %f %f", bodyX, bodyY, bodyTheta, d_left, d_right, d, th);
+
+	if(displayDebugOdom && (leftTmp != 0 || rightTmp !=0 )) {
+            ROS_INFO("odom2: %d %d ( %d %d ) (%f %f %f) ( %f %f ) %f %f", encoderLeftPulses, encoderRightPulses, leftTmp, rightTmp,  bodyX, bodyY, bodyTheta, d_left, d_right, d, th);
+	}
 
         //since all odometry is 6DOF we'll need a quaternion created from yaw
         geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(bodyTheta);
